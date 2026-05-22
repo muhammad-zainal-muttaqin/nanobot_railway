@@ -5,7 +5,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN uv pip install --system --no-cache "nanobot-ai==0.2.0" "python-telegram-bot[socks] @ git+https://github.com/muhammad-zainal-muttaqin/python-telegram-bot-v10.git@6fdab3a58d438cf998e0bde6b77f44d37bfef058" -r /app/requirements.txt
+RUN uv pip install --system --no-cache "nanobot-ai==0.2.0" "python-telegram-bot[socks] @ git+https://github.com/muhammad-zainal-muttaqin/python-telegram-bot-v10.git@164972bf946aa069c3a655f657fdec756590549c" -r /app/requirements.txt
 
 RUN mkdir -p /data/.nanobot
 

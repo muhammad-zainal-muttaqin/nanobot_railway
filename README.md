@@ -11,7 +11,7 @@ This repository is a lightweight Railway deployment wrapper for [HKUDS/nanobot](
 This fork is patched for the upstream stable package:
 
 * `nanobot-ai==0.2.0`
-* `python-telegram-bot[socks]` from `muhammad-zainal-muttaqin/python-telegram-bot-v10` at commit `6fdab3a58d438cf998e0bde6b77f44d37bfef058`
+* `python-telegram-bot[socks]` from `muhammad-zainal-muttaqin/python-telegram-bot-v10` at commit `164972bf946aa069c3a655f657fdec756590549c`
 * Starlette, Uvicorn, Jinja2, and python-multipart are bounded below the next major version for more reproducible Railway builds.
 
 Because this repository is a wrapper, upstream core behavior is updated by changing the installed `nanobot-ai` package version in the `Dockerfile`, not by merging upstream Python source files into this repo.
@@ -46,13 +46,13 @@ This wrapper now implements the nanobot-side transport needed for those flows:
 * `channels.telegram.botToBotMaxPerMinute` rate-limits bot-origin messages to reduce accidental loops.
 * The dashboard can send a direct bot-to-bot test message through `POST /api/telegram/bot-to-bot/send`.
 
-Important: the cloned fork `muhammad-zainal-muttaqin/python-telegram-bot-v10` currently still reports `python-telegram-bot 22.7` and `telegram.constants.BOT_API_VERSION == 9.5` in local verification. This repository therefore does not claim full typed wrapper coverage for Bot API 10.0 yet. The bot-to-bot direct send path uses Telegram's raw HTTPS Bot API `sendMessage` so it is not blocked by missing PTB method typing.
+The pinned fork commit reports `telegram.constants.BOT_API_VERSION == 10.0` and includes a regression test that `Bot.send_message("@OtherBot", "text")` passes the bot username as `chat_id`. The nanobot dashboard still uses a raw HTTPS `sendMessage` call for the manual bot-to-bot send button so this wrapper is not blocked by future PTB method-surface changes.
 
 The dashboard and `/api/status` expose this clearly:
 
 * Existing Telegram long-polling bot behavior remains supported through nanobot upstream.
 * The reported wrapper Bot API version is shown separately from the target Bot API 10.0.
-* Bot-to-bot receive/send controls are exposed, but other Bot API 10-only features are not claimed as complete.
+* Bot-to-bot receive/send controls are exposed. Other Bot API 10-only features are outside this wrapper's current scope.
 
 ## Requirements
 
@@ -164,7 +164,7 @@ Without Docker, you can still run the Python checks:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install "nanobot-ai==0.2.0" "python-telegram-bot[socks]==22.7" -r requirements.txt
-.\.venv\Scripts\python.exe -m pip install "python-telegram-bot[socks] @ git+https://github.com/muhammad-zainal-muttaqin/python-telegram-bot-v10.git@6fdab3a58d438cf998e0bde6b77f44d37bfef058"
+.\.venv\Scripts\python.exe -m pip install "python-telegram-bot[socks] @ git+https://github.com/muhammad-zainal-muttaqin/python-telegram-bot-v10.git@164972bf946aa069c3a655f657fdec756590549c"
 .\.venv\Scripts\python.exe -m py_compile server.py
 .\.venv\Scripts\python.exe -m py_compile nanobot_railway_patches\sitecustomize.py
 .\.venv\Scripts\python.exe -m mypy server.py nanobot_railway_patches\sitecustomize.py --ignore-missing-imports --check-untyped-defs --show-error-codes
