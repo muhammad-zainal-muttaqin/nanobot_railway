@@ -28,13 +28,13 @@ Compared with a plain `nanobot-ai` install, this Railway wrapper provides:
 * `/api/status` version reporting for installed `nanobot-ai`, installed `python-telegram-bot`, gateway state, configured providers, enabled channels, and cron jobs.
 * Dashboard controls for additional upstream 0.2.0 fields, including more providers, Telegram options, channel defaults, agent defaults, and tools settings.
 * A runtime Telegram patch loaded through `PYTHONPATH=/app/nanobot_railway_patches`, so the gateway subprocess can accept bot senders when bot-to-bot mode is enabled without vendoring nanobot core source.
-* A raw Bot API `sendMessage` endpoint and dashboard control to send a private message from your bot to another bot username, e.g. `@OtherBot`.
+* A raw Bot API `sendMessage` endpoint and dashboard control to send a private bot message to `@OtherBot`, or a group test message to a numeric Telegram chat ID.
 
 ## Telegram Bot API 10 Note
 
 Telegram Bot API 10.0 introduced bot-to-bot communication. Telegram's public guide says:
 
-* In groups, bots can receive messages from other bots when mentioned or replied to; broader receipt requires Bot-to-Bot Communication Mode plus admin rights or disabled group privacy.
+* In groups, bots can receive messages from other bots through command mentions such as `/ping@OtherBot` or direct replies to a bot message; broader receipt requires Bot-to-Bot Communication Mode plus admin rights or disabled group privacy.
 * In private chats, a bot can send to another bot by passing the recipient `@username` to `sendMessage`.
 * Private bot-to-bot messaging requires Bot-to-Bot Communication Mode to be enabled for both sender and recipient in BotFather.
 * Loop prevention is required.
@@ -44,7 +44,8 @@ This wrapper now implements the nanobot-side transport needed for those flows:
 * `channels.telegram.botToBot` enables processing inbound Telegram messages whose sender is a bot.
 * `channels.telegram.botToBotAllowBots` optionally restricts bot senders by `@username` or numeric bot ID.
 * `channels.telegram.botToBotMaxPerMinute` rate-limits bot-origin messages to reduce accidental loops.
-* The dashboard can send a direct bot-to-bot test message through `POST /api/telegram/bot-to-bot/send`.
+* The runtime patch applies bot allowlisting to both normal messages and Telegram command messages, so `/command@ThisBot` from another bot is no longer dropped by the older human-only allowlist path.
+* The dashboard can send a private bot-to-bot test message or a group mention test through `POST /api/telegram/bot-to-bot/send`.
 
 The pinned fork commit reports `telegram.constants.BOT_API_VERSION == 10.0` and includes a regression test that `Bot.send_message("@OtherBot", "text")` passes the bot username as `chat_id`. The nanobot dashboard still uses a raw HTTPS `sendMessage` call for the manual bot-to-bot send button so this wrapper is not blocked by future PTB method-surface changes.
 
@@ -124,7 +125,7 @@ Additional Telegram settings exposed by this fork include group policy, streamin
 5. Save and restart the gateway.
 6. Use the Telegram bot-to-bot send controls to send a direct test message to `@OtherBot`.
 
-For group communication, add both bots to the same group and mention or reply to the receiving bot. For unattended multi-agent loops, keep `botToBotMaxPerMinute` conservative.
+For group communication, add both bots to the same group and prefer command mentions such as `/ping@OtherBot hi` or direct replies to the receiving bot's message. Plain text mentions like `@OtherBot hi` are handled if Telegram delivers the update, but command mentions and replies are the Bot API 10 path to test first. The dashboard target field also accepts a numeric group chat ID such as `-1001234567890`; use the optional topic ID field for forum topics. For unattended multi-agent loops, keep `botToBotMaxPerMinute` conservative.
 
 ## Start and Monitor
 
@@ -151,7 +152,8 @@ Common checks:
 * `GET /api/config` - Read merged config with secrets masked.
 * `PUT /api/config` - Save config, preserving masked secrets.
 * `GET /api/status` - Gateway state, package versions, providers, channels, cron jobs.
-* `POST /api/telegram/bot-to-bot/send` - Send a raw Bot API `sendMessage` request from the configured Telegram bot token to a target `@BotUsername`.
+* `GET /api/telegram/effective-config` - Read effective Telegram config with secrets masked, including bot-to-bot status.
+* `POST /api/telegram/bot-to-bot/send` - Send a raw Bot API `sendMessage` request from the configured Telegram bot token to a target `@BotUsername` or numeric group chat ID.
 * `GET /api/logs` - Recent gateway logs.
 * `POST /api/gateway/start` - Start gateway.
 * `POST /api/gateway/stop` - Stop gateway.

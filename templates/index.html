@@ -518,13 +518,16 @@
                   x-model.number="config.channels.telegram.botToBotMaxPerMinute">
               </div>
               <div class="md:col-span-2 border-t border-gray-800 pt-4 mt-2">
-                <div class="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-3">
+                <div class="grid grid-cols-1 md:grid-cols-[220px_140px_1fr_auto] gap-3">
                   <input type="text"
                     class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
-                    x-model="botToBot.target" placeholder="@OtherBot">
+                    x-model="botToBot.target" placeholder="@OtherBot or -100...">
                   <input type="text"
                     class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
-                    x-model="botToBot.text" placeholder="Message to send">
+                    x-model="botToBot.messageThreadId" placeholder="Topic ID">
+                  <input type="text"
+                    class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
+                    x-model="botToBot.text" placeholder="/ping@OtherBot hi">
                   <button @click="sendBotToBot()" :disabled="botToBot.sending"
                     class="px-4 py-2 bg-white text-black rounded-lg text-sm font-medium disabled:opacity-50">
                     Send
@@ -932,7 +935,7 @@
         restartAfterSave: true,
         toast: { show: false, message: '', type: 'success' },
         customModels: {},
-        botToBot: { target: '', text: '', sending: false },
+        botToBot: { target: '', messageThreadId: '', text: '', sending: false },
 
         providerList: [
           // Requested order: Gemini, Anthropic, Groq, OpenAI, then the rest.
@@ -1295,7 +1298,11 @@
             const res = await fetch('/api/telegram/bot-to-bot/send', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ target: this.botToBot.target, text: this.botToBot.text }),
+              body: JSON.stringify({
+                target: this.botToBot.target,
+                messageThreadId: this.botToBot.messageThreadId,
+                text: this.botToBot.text,
+              }),
             });
             const data = await res.json();
             if (res.ok) {

@@ -329,6 +329,26 @@ def runtime_versions() -> dict:
             "wrapper": bot_api,
             "support": support,
         },
+        "railway_patch": {
+            "telegram_bot_to_bot": True,
+        },
+    }
+
+
+def _telegram_bot_to_bot_status(data: dict[str, Any]) -> dict[str, Any]:
+    telegram_config = data.get("channels", {}).get("telegram", {})
+    if not isinstance(telegram_config, dict):
+        telegram_config = {}
+    allow_bots = telegram_config.get("botToBotAllowBots") or telegram_config.get("bot_to_bot_allow_bots") or []
+    return {
+        "enabled": bool(telegram_config.get("botToBot") or telegram_config.get("bot_to_bot")),
+        "allowlistCount": len(allow_bots) if isinstance(allow_bots, list) else 0,
+        "maxPerMinute": telegram_config.get("botToBotMaxPerMinute")
+        or telegram_config.get("bot_to_bot_max_per_minute")
+        or 12,
+        "maxChainDepth": telegram_config.get("botToBotMaxChainDepth")
+        or telegram_config.get("bot_to_bot_max_chain_depth")
+        or 6,
     }
 
 
@@ -430,9 +450,26 @@ async def api_status(request: Request):
     return JSONResponse({
         "gateway": gateway.get_status(),
         "versions": runtime_versions(),
+        "telegramBotToBot": _telegram_bot_to_bot_status(data),
         "providers": providers,
         "channels": channels,
         "cron": {"count": len(cron_jobs), "jobs": cron_jobs},
+    })
+
+
+async def api_telegram_effective_config(request: Request):
+    auth_err = require_auth(request)
+    if auth_err:
+        return auth_err
+
+    data = _merged_config_data()
+    telegram_config = data.get("channels", {}).get("telegram", {})
+    if not isinstance(telegram_config, dict):
+        telegram_config = {}
+    visible = mask_secrets(telegram_config)
+    return JSONResponse({
+        "telegram": visible,
+        "botToBot": _telegram_bot_to_bot_status(data),
     })
 
 
@@ -448,8 +485,17 @@ async def api_telegram_bot_to_bot_send(request: Request):
 
     target = str(body.get("target", "")).strip()
     text = str(body.get("text", "")).strip()
-    if not re.fullmatch(r"@[A-Za-z0-9_]{5,32}", target):
-        return JSONResponse({"error": "target must be a Telegram bot username like @OtherBot"}, status_code=400)
+    message_thread_id = body.get("messageThreadId")
+    direct_bot_target = bool(re.fullmatch(r"@[A-Za-z0-9_]{5,32}", target))
+    group_chat_target = bool(re.fullmatch(r"-?\d{5,32}", target))
+    if not direct_bot_target and not group_chat_target:
+        return JSONResponse({
+            "error": "target must be a Telegram bot username like @OtherBot or a numeric group chat ID"
+        }, status_code=400)
+    if message_thread_id in ("", None):
+        message_thread_id = None
+    elif not re.fullmatch(r"\d{1,32}", str(message_thread_id).strip()):
+        return JSONResponse({"error": "messageThreadId must be numeric when provided"}, status_code=400)
     if not text:
         return JSONResponse({"error": "text is required"}, status_code=400)
     if len(text) > 4096:
@@ -464,10 +510,13 @@ async def api_telegram_bot_to_bot_send(request: Request):
     try:
         import httpx
 
+        payload_json: dict[str, Any] = {"chat_id": target, "text": text}
+        if message_thread_id is not None:
+            payload_json["message_thread_id"] = int(str(message_thread_id).strip())
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": target, "text": text},
+                json=payload_json,
             )
         payload = response.json()
     except Exception as e:
@@ -481,6 +530,7 @@ async def api_telegram_bot_to_bot_send(request: Request):
         "ok": True,
         "target": target,
         "messageId": payload.get("result", {}).get("message_id"),
+        "messageThreadId": payload.get("result", {}).get("message_thread_id"),
     })
 
 
@@ -539,6 +589,7 @@ routes = [
     Route("/api/config", api_config_get, methods=["GET"]),
     Route("/api/config", api_config_put, methods=["PUT"]),
     Route("/api/status", api_status),
+    Route("/api/telegram/effective-config", api_telegram_effective_config),
     Route("/api/telegram/bot-to-bot/send", api_telegram_bot_to_bot_send, methods=["POST"]),
     Route("/api/logs", api_logs),
     Route("/api/gateway/start", api_gateway_start, methods=["POST"]),
