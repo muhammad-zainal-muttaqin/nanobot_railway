@@ -7,7 +7,9 @@ import secrets
 import signal
 import time
 from collections import deque
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any, cast
 
 from starlette.applications import Starlette
 from starlette.authentication import (
@@ -30,7 +32,36 @@ from nanobot.config.loader import (
 from nanobot.config.schema import Config
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
-SECRET_FIELDS = {"api_key", "apiKey", "token", "app_secret", "appSecret", "encrypt_key", "encryptKey", "verification_token", "verificationToken"}
+SECRET_FIELDS = {
+    "api_key",
+    "apiKey",
+    "token",
+    "botToken",
+    "app_token",
+    "appToken",
+    "access_token",
+    "accessToken",
+    "refresh_token",
+    "refreshToken",
+    "client_secret",
+    "clientSecret",
+    "app_secret",
+    "appSecret",
+    "smtp_password",
+    "smtpPassword",
+    "imap_password",
+    "imapPassword",
+    "app_password",
+    "appPassword",
+    "secret",
+    "claw_token",
+    "clawToken",
+    "encrypt_key",
+    "encryptKey",
+    "verification_token",
+    "verificationToken",
+}
+CONFIG_PATH = Path.home() / ".nanobot" / "config.json"
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -86,6 +117,7 @@ class GatewayManager:
         if self.process and self.process.returncode is None:
             return
         self.state = "starting"
+        self._cleanup_read_tasks()
         try:
             self.process = await asyncio.create_subprocess_exec(
                 "nanobot", "gateway",
@@ -103,6 +135,7 @@ class GatewayManager:
     async def stop(self):
         if not self.process or self.process.returncode is not None:
             self.state = "stopped"
+            self._cleanup_read_tasks()
             return
         self.state = "stopping"
         self.process.terminate()
@@ -113,6 +146,7 @@ class GatewayManager:
             await self.process.wait()
         self.state = "stopped"
         self.start_time = None
+        self._cleanup_read_tasks()
 
     async def restart(self):
         await self.stop()
@@ -133,6 +167,10 @@ class GatewayManager:
         if self.process and self.process.returncode is not None and self.state == "running":
             self.state = "error"
             self.logs.append(f"Gateway exited with code {self.process.returncode}")
+        self._cleanup_read_tasks()
+
+    def _cleanup_read_tasks(self):
+        self._read_tasks = [task for task in self._read_tasks if not task.done()]
 
     def get_status(self) -> dict:
         pid = None
@@ -158,7 +196,7 @@ def mask_secrets(data, _path=""):
     if isinstance(data, dict):
         result = {}
         for k, v in data.items():
-            if k in SECRET_FIELDS and isinstance(v, str) and v:
+            if _is_secret_field(k) and isinstance(v, str) and v:
                 result[k] = v[:8] + "***" if len(v) > 8 else "***"
             else:
                 result[k] = mask_secrets(v, f"{_path}.{k}")
@@ -166,6 +204,44 @@ def mask_secrets(data, _path=""):
     if isinstance(data, list):
         return [mask_secrets(item, _path) for item in data]
     return data
+
+
+def _is_secret_field(name: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", name.lower())
+    if name in SECRET_FIELDS:
+        return True
+    return any(part in normalized for part in ("apikey", "token", "secret", "password"))
+
+
+def _load_raw_config() -> dict[str, Any]:
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_raw_config(data: dict[str, Any]):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _deep_merge(base: Any, overlay: Any) -> Any:
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        result = dict(base)
+        for key, value in overlay.items():
+            result[key] = _deep_merge(result.get(key), value)
+        return result
+    return overlay
+
+
+def _merged_config_data() -> dict:
+    defaults = Config().model_dump(by_alias=True)
+    loaded = load_config().model_dump(by_alias=True)
+    raw = _load_raw_config()
+    return _deep_merge(_deep_merge(defaults, loaded), raw)
 
 
 def _collect_secret_values(data, field_name):
@@ -186,12 +262,51 @@ def merge_secrets(new_data, existing_data):
     if isinstance(new_data, dict) and isinstance(existing_data, dict):
         result = {}
         for k, v in new_data.items():
-            if k in SECRET_FIELDS and isinstance(v, str) and (v.endswith("***") or v == ""):
+            if _is_secret_field(k) and isinstance(v, str) and (v.endswith("***") or v == ""):
                 result[k] = existing_data.get(k, "")
             else:
                 result[k] = merge_secrets(v, existing_data.get(k, {}))
         return result
     return new_data
+
+
+def _normalize_optional_empty_strings(data):
+    nullable_paths = {
+        ("agents", "defaults", "reasoningEffort"),
+        ("channels", "transcriptionLanguage"),
+        ("channels", "telegram", "proxy"),
+        ("tools", "web", "proxy"),
+        ("tools", "web", "userAgent"),
+    }
+
+    def walk(value, path=()):
+        if isinstance(value, dict):
+            return {k: walk(v, path + (k,)) for k, v in value.items()}
+        if path in nullable_paths and value == "":
+            return None
+        return value
+
+    return walk(data)
+
+
+def _package_version(package_name: str) -> str | None:
+    try:
+        return version(package_name)
+    except PackageNotFoundError:
+        return None
+
+
+def runtime_versions() -> dict:
+    ptb = _package_version("python-telegram-bot")
+    return {
+        "nanobot_ai": _package_version("nanobot-ai"),
+        "python_telegram_bot": ptb,
+        "telegram_bot_api": {
+            "target": "10.0",
+            "wrapper": ptb,
+            "support": "Bot API 10.0 features unavailable unless the installed wrapper supports them.",
+        },
+    }
 
 
 async def homepage(request: Request):
@@ -211,8 +326,7 @@ async def api_config_get(request: Request):
     auth_err = require_auth(request)
     if auth_err:
         return auth_err
-    config = load_config()
-    data = config.model_dump(by_alias=True)
+    data = _merged_config_data()
     return JSONResponse(mask_secrets(data))
 
 
@@ -230,10 +344,10 @@ async def api_config_put(request: Request):
         restart = body.pop("_restartGateway", False)
 
         async with config_lock:
-            existing_config = load_config()
-            existing_data = existing_config.model_dump(by_alias=True)
+            existing_data = _merged_config_data()
 
             merged = merge_secrets(body, existing_data)
+            merged = _normalize_optional_empty_strings(_deep_merge(existing_data, merged))
 
             try:
                 new_config = Config.model_validate(merged)
@@ -246,6 +360,8 @@ async def api_config_put(request: Request):
                 return JSONResponse({"error": f"Validation error: {err_msg}"}, status_code=400)
 
             save_config(new_config)
+            raw_config = cast(dict[str, Any], _deep_merge(new_config.model_dump(by_alias=True), merged))
+            _write_raw_config(raw_config)
 
         if restart:
             asyncio.create_task(gateway.restart())
@@ -261,12 +377,13 @@ async def api_status(request: Request):
     if auth_err:
         return auth_err
 
-    config = load_config()
-    data = config.model_dump()
+    data = _merged_config_data()
 
     providers = {}
     for name, prov in data["providers"].items():
-        providers[name] = {"configured": bool(prov.get("api_key"))}
+        if not isinstance(prov, dict):
+            continue
+        providers[name] = {"configured": bool(prov.get("apiKey") or prov.get("api_key"))}
 
     # ChannelsConfig mixes global fields (send_progress, …) with per-channel dicts (telegram, …).
     # Only dict-shaped entries represent actual channels with an "enabled" flag.
@@ -289,6 +406,7 @@ async def api_status(request: Request):
 
     return JSONResponse({
         "gateway": gateway.get_status(),
+        "versions": runtime_versions(),
         "providers": providers,
         "channels": channels,
         "cron": {"count": len(cron_jobs), "jobs": cron_jobs},

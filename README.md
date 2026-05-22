@@ -1,135 +1,151 @@
 ![Nanobot](https://github.com/HKUDS/nanobot/raw/main/nanobot_logo.png)
 
-# Deploy and Host nanobot on Railway
+# Nanobot Railway Wrapper
 
-Nanobot is a lightweight AI gateway and orchestration layer that routes requests across multiple LLM providers and messaging channels such as Telegram. It provides a centralized dashboard to manage models, API keys, and runtime configuration, making it ideal for building scalable AI-powered backends without managing multiple integrations manually.
+This repository is a lightweight Railway deployment wrapper for [HKUDS/nanobot](https://github.com/HKUDS/nanobot). It does not vendor the upstream nanobot source code. The Docker image installs the published `nanobot-ai` package, then runs a small Starlette admin dashboard for Railway-friendly configuration, status, logs, and gateway process control.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/nanobot-4?referralCode=asepsp&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
-## About Hosting nanobot
+## Current Fork Status
 
-Hosting nanobot involves deploying a containerized gateway service along with its admin dashboard. The system acts as a middleware between your applications (or chat channels) and multiple AI providers such as OpenAI, Gemini, or Groq.
+This fork is patched for the upstream stable package:
 
-Instead of hardcoding API integrations, nanobot allows dynamic configuration via a web dashboard, with persistent storage for settings. On Railway, deployment becomes straightforward: you run a Docker container, attach a persistent volume, and configure environment variables. Railway handles networking, scaling, and uptime, while nanobot handles AI routing, logging, and orchestration.
+* `nanobot-ai==0.2.0`
+* `python-telegram-bot[socks]==22.7`
+* Starlette, Uvicorn, Jinja2, and python-multipart are bounded below the next major version for more reproducible Railway builds.
 
-![Architecture](https://github.com/HKUDS/nanobot/raw/main/nanobot_arch.png)
+Because this repository is a wrapper, upstream core behavior is updated by changing the installed `nanobot-ai` package version in the `Dockerfile`, not by merging upstream Python source files into this repo.
 
-## Common Use Cases
+## What This Fork Adds
 
-* Multi-LLM Gateway (OpenAI, Gemini, Groq switching & fallback)
-* Telegram / Messaging AI Bot backend (no need to build from scratch)
-* Internal AI API Hub (centralized AI access for multiple services)
-* Experimentation layer for prompt routing and model benchmarking
+Compared with a plain `nanobot-ai` install, this Railway wrapper provides:
 
-## Dependencies for nanobot Hosting
+* Basic Auth protected web dashboard.
+* Lazy gateway startup on `/` and `/health`, useful for Railway deployments.
+* Persistent config under `/data/.nanobot` by setting `HOME=/data`.
+* Masked config API, so secrets shown by `GET /api/config` can be posted back without erasing the real stored values.
+* Config merge behavior that keeps upstream 0.2.0 defaults while preserving older local config, masked secrets, and unknown/plugin channel or provider blocks.
+* `/api/status` version reporting for installed `nanobot-ai`, installed `python-telegram-bot`, gateway state, configured providers, enabled channels, and cron jobs.
+* Dashboard controls for additional upstream 0.2.0 fields, including more providers, Telegram options, channel defaults, agent defaults, and tools settings.
 
-* Docker (containerized deployment)
-* Railway account (for hosting and infrastructure)
-* Persistent storage (/data volume for config & logs)
+## Telegram Bot API 10 Note
 
-### Deployment Dependencies
+Telegram Bot API 10.0 was released after the currently pinned Telegram wrapper support level. This fork pins `python-telegram-bot==22.7`, which is the latest compatible wrapper found during the update work, but it should not be treated as full Bot API 10 support.
 
-* Upstream Nanobot: [https://github.com/HKUDS/nanobot](https://github.com/HKUDS/nanobot)
-* Railway Platform: [https://railway.com](https://railway.com)
-* Telegram Bot (optional): [https://core.telegram.org/bots](https://core.telegram.org/bots)
+The dashboard and `/api/status` expose this clearly:
 
-### Implementation Details
+* Existing Telegram long-polling bot behavior remains supported through nanobot upstream.
+* Bot API 10-only features are not exposed as supported.
+* A raw HTTP Bot API 10 compatibility adapter is not included, because the existing chat bot flow does not require Bot API 10-only features.
 
-#### Architecture Overview
+## Requirements
 
-Nanobot runs as a single container that exposes:
+For Railway deployment:
 
-* Admin Dashboard (Basic Auth protected)
-* Gateway API for routing requests
-* Background worker loop (for message processing)
+* Railway account.
+* Railway persistent volume mounted at `/data`.
 
-Data persistence:
+For local container testing:
 
-* All configuration and state stored in `/data` (must use Railway Volume)
+* Docker.
 
-#### Step 1 — Deploy on Railway
+For local Python-only checks:
 
-* Deploy this template on Railway
-* Railway builds using the `Dockerfile` (via `railway.toml`)
-* A public URL will be automatically assigned
-* Strongly recommended:
+* Python 3.12 or newer is recommended.
+* A virtual environment can install `nanobot-ai==0.2.0` and this wrapper's `requirements.txt`.
 
-  * Attach a Volume mounted to `/data` (critical for persistence)
+## Deploy on Railway
 
-#### Step 2 — Admin Credentials
+1. Deploy this template on Railway.
+2. Attach a persistent volume mounted to `/data`.
+3. Set admin credentials:
 
-Set environment variables:
+```text
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your-strong-password
+```
 
-* `ADMIN_USERNAME` → dashboard login username
-* `ADMIN_PASSWORD` → dashboard login password
+If `ADMIN_PASSWORD` is not set, the server generates a random password at startup and prints it to logs. For production, set it explicitly.
 
-Notes:
-* For production: ALWAYS set explicitly
+Railway builds the image with `Dockerfile` and starts `/app/start.sh`.
 
-#### Step 3 — Configure LLM Providers
+## Configure Providers
 
-1. Open your Railway public URL
-2. Login using Basic Auth
-3. Go to **AI Providers tab**
-4. Add API Keys:
+1. Open your Railway public URL.
+2. Log in with Basic Auth.
+3. Go to **AI Providers**.
+4. Add at least one API key.
+5. Choose a provider/model or leave provider selection on `auto`.
+6. Save changes.
 
-   * OpenAI
-   * Groq
-   * Gemini
-5. Select models (or custom model ID)
-6. Set default provider (toggle)
-7. Save configuration (stored in `/data`)
+![AI Providers tab](./img/ai_providers.png)
 
-    ![AI Providers tab](./img/ai_providers.png)
+The dashboard includes upstream 0.2.0 provider slots such as Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Zhipu, vLLM, Azure OpenAI, Bedrock, Hugging Face, DashScope, Ollama, LM Studio, Moonshot, MiniMax, Mistral, SiliconFlow, Volcengine, BytePlus, Qianfan, NVIDIA, and related compatible providers.
 
-#### Step 4 — Configure Messaging Channels (Telegram Example)
+## Configure Telegram
 
-1. Go to **Channels tab**
-2. Enable Telegram
-3. Paste bot token from BotFather
+1. Go to **Channels**.
+2. Enable Telegram.
+3. Paste your BotFather token.
 4. Set allowed users:
 
-   * `*` → allow all users
-   * or specific user IDs (comma-separated)
+```text
+*
+```
 
-    ![Channels tab](./img/channels.png)
+or a comma-separated list of Telegram user IDs.
 
-You can also configure:
+![Channels tab](./img/channels.png)
 
-* WhatsApp bridge
-* Feishu / other integrations
+Additional Telegram settings exposed by this fork include group policy, streaming, inline keyboards, reply behavior, reaction emoji, connection pool size, pool timeout, stream edit interval, and proxy.
 
-#### Step 5 — Run and Test Gateway
+## Start and Monitor
 
-* Go to **Overview / Settings**
-* Start or restart the gateway
-* Check logs for errors
-* Send test message to your bot
+Use the dashboard footer buttons to start, stop, or restart the gateway. The Overview page shows provider/channel counts and installed package versions.
 
-    ![Overview tab](./img/overview.png)
+![Overview tab](./img/overview.png)
 
-If no response:
+Use the Logs tab if the bot does not respond.
 
-* Check API keys
-* Check provider selection
-* Check logs
-  
-  ![Logs](./img/logs.png)
+![Logs](./img/logs.png)
 
-#### Key Endpoints
+Common checks:
 
-* `GET /` → Admin dashboard (Basic Auth)
-* `GET /health` → Healthcheck (Railway)
-* `GET /api/config` → Read config (masked)
-* `PUT /api/config` → Save config
-* `GET /api/status` → Gateway status
-* `GET /api/logs` → Logs
-* `POST /api/gateway/start` → Start gateway
-* `POST /api/gateway/stop` → Stop gateway
-* `POST /api/gateway/restart` → Restart gateway
+* At least one provider API key is configured.
+* Telegram token is valid.
+* Telegram allowed users include your user ID or `*`.
+* Gateway is running.
+* Logs do not show provider authentication or validation errors.
 
-## Why Deploy nanobot on Railway?
+## Endpoints
 
-Railway is a singular platform to deploy your infrastructure stack. Railway will host your infrastructure so you don't have to deal with configuration, while allowing you to vertically and horizontally scale it.
+* `GET /` - Admin dashboard, Basic Auth protected.
+* `GET /health` - Railway healthcheck.
+* `GET /api/config` - Read merged config with secrets masked.
+* `PUT /api/config` - Save config, preserving masked secrets.
+* `GET /api/status` - Gateway state, package versions, providers, channels, cron jobs.
+* `GET /api/logs` - Recent gateway logs.
+* `POST /api/gateway/start` - Start gateway.
+* `POST /api/gateway/stop` - Stop gateway.
+* `POST /api/gateway/restart` - Restart gateway.
 
-By deploying nanobot on Railway, you are one step closer to supporting a complete full-stack application with minimal burden. Host your servers, databases, AI agents, and more on Railway.
+## Local Verification
+
+Without Docker, you can still run the Python checks:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "nanobot-ai==0.2.0" "python-telegram-bot[socks]==22.7" -r requirements.txt
+.\.venv\Scripts\python.exe -m py_compile server.py
+.\.venv\Scripts\python.exe -m mypy server.py --ignore-missing-imports --check-untyped-defs --show-error-codes
+.\.venv\Scripts\python.exe -m pyright server.py
+```
+
+For container verification on a machine with Docker:
+
+```powershell
+docker build -t nanobot-railway .
+docker run --rm -p 8080:8080 -e PORT=8080 -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=admin -v nanobot-data:/data nanobot-railway
+```
+
+Then open `http://localhost:8080`.
