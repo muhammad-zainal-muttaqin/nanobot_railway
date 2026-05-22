@@ -11,7 +11,7 @@ This repository is a lightweight Railway deployment wrapper for [HKUDS/nanobot](
 This fork is patched for the upstream stable package:
 
 * `nanobot-ai==0.2.0`
-* `python-telegram-bot[socks]==22.7`
+* `python-telegram-bot[socks]` from `muhammad-zainal-muttaqin/python-telegram-bot-v10` at commit `6fdab3a58d438cf998e0bde6b77f44d37bfef058`
 * Starlette, Uvicorn, Jinja2, and python-multipart are bounded below the next major version for more reproducible Railway builds.
 
 Because this repository is a wrapper, upstream core behavior is updated by changing the installed `nanobot-ai` package version in the `Dockerfile`, not by merging upstream Python source files into this repo.
@@ -27,16 +27,32 @@ Compared with a plain `nanobot-ai` install, this Railway wrapper provides:
 * Config merge behavior that keeps upstream 0.2.0 defaults while preserving older local config, masked secrets, and unknown/plugin channel or provider blocks.
 * `/api/status` version reporting for installed `nanobot-ai`, installed `python-telegram-bot`, gateway state, configured providers, enabled channels, and cron jobs.
 * Dashboard controls for additional upstream 0.2.0 fields, including more providers, Telegram options, channel defaults, agent defaults, and tools settings.
+* A runtime Telegram patch loaded through `PYTHONPATH=/app/nanobot_railway_patches`, so the gateway subprocess can accept bot senders when bot-to-bot mode is enabled without vendoring nanobot core source.
+* A raw Bot API `sendMessage` endpoint and dashboard control to send a private message from your bot to another bot username, e.g. `@OtherBot`.
 
 ## Telegram Bot API 10 Note
 
-Telegram Bot API 10.0 was released after the currently pinned Telegram wrapper support level. This fork pins `python-telegram-bot==22.7`, which is the latest compatible wrapper found during the update work, but it should not be treated as full Bot API 10 support.
+Telegram Bot API 10.0 introduced bot-to-bot communication. Telegram's public guide says:
+
+* In groups, bots can receive messages from other bots when mentioned or replied to; broader receipt requires Bot-to-Bot Communication Mode plus admin rights or disabled group privacy.
+* In private chats, a bot can send to another bot by passing the recipient `@username` to `sendMessage`.
+* Private bot-to-bot messaging requires Bot-to-Bot Communication Mode to be enabled for both sender and recipient in BotFather.
+* Loop prevention is required.
+
+This wrapper now implements the nanobot-side transport needed for those flows:
+
+* `channels.telegram.botToBot` enables processing inbound Telegram messages whose sender is a bot.
+* `channels.telegram.botToBotAllowBots` optionally restricts bot senders by `@username` or numeric bot ID.
+* `channels.telegram.botToBotMaxPerMinute` rate-limits bot-origin messages to reduce accidental loops.
+* The dashboard can send a direct bot-to-bot test message through `POST /api/telegram/bot-to-bot/send`.
+
+Important: the cloned fork `muhammad-zainal-muttaqin/python-telegram-bot-v10` currently still reports `python-telegram-bot 22.7` and `telegram.constants.BOT_API_VERSION == 9.5` in local verification. This repository therefore does not claim full typed wrapper coverage for Bot API 10.0 yet. The bot-to-bot direct send path uses Telegram's raw HTTPS Bot API `sendMessage` so it is not blocked by missing PTB method typing.
 
 The dashboard and `/api/status` expose this clearly:
 
 * Existing Telegram long-polling bot behavior remains supported through nanobot upstream.
-* Bot API 10-only features are not exposed as supported.
-* A raw HTTP Bot API 10 compatibility adapter is not included, because the existing chat bot flow does not require Bot API 10-only features.
+* The reported wrapper Bot API version is shown separately from the target Bot API 10.0.
+* Bot-to-bot receive/send controls are exposed, but other Bot API 10-only features are not claimed as complete.
 
 ## Requirements
 
@@ -99,6 +115,17 @@ or a comma-separated list of Telegram user IDs.
 
 Additional Telegram settings exposed by this fork include group policy, streaming, inline keyboards, reply behavior, reaction emoji, connection pool size, pool timeout, stream edit interval, and proxy.
 
+### Bot-to-Bot Setup
+
+1. In BotFather, enable Bot-to-Bot Communication Mode for this bot.
+2. Enable Bot-to-Bot Communication Mode for the other bot as well if you want private bot-to-bot messages.
+3. In this dashboard, enable **Bot-to-bot receive mode** under Telegram.
+4. Set **Allowed Bots** to `*`, or list trusted bot usernames/IDs such as `@OtherBot`.
+5. Save and restart the gateway.
+6. Use the Telegram bot-to-bot send controls to send a direct test message to `@OtherBot`.
+
+For group communication, add both bots to the same group and mention or reply to the receiving bot. For unattended multi-agent loops, keep `botToBotMaxPerMinute` conservative.
+
 ## Start and Monitor
 
 Use the dashboard footer buttons to start, stop, or restart the gateway. The Overview page shows provider/channel counts and installed package versions.
@@ -124,6 +151,7 @@ Common checks:
 * `GET /api/config` - Read merged config with secrets masked.
 * `PUT /api/config` - Save config, preserving masked secrets.
 * `GET /api/status` - Gateway state, package versions, providers, channels, cron jobs.
+* `POST /api/telegram/bot-to-bot/send` - Send a raw Bot API `sendMessage` request from the configured Telegram bot token to a target `@BotUsername`.
 * `GET /api/logs` - Recent gateway logs.
 * `POST /api/gateway/start` - Start gateway.
 * `POST /api/gateway/stop` - Stop gateway.
@@ -136,9 +164,11 @@ Without Docker, you can still run the Python checks:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install "nanobot-ai==0.2.0" "python-telegram-bot[socks]==22.7" -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install "python-telegram-bot[socks] @ git+https://github.com/muhammad-zainal-muttaqin/python-telegram-bot-v10.git@6fdab3a58d438cf998e0bde6b77f44d37bfef058"
 .\.venv\Scripts\python.exe -m py_compile server.py
-.\.venv\Scripts\python.exe -m mypy server.py --ignore-missing-imports --check-untyped-defs --show-error-codes
-.\.venv\Scripts\python.exe -m pyright server.py
+.\.venv\Scripts\python.exe -m py_compile nanobot_railway_patches\sitecustomize.py
+.\.venv\Scripts\python.exe -m mypy server.py nanobot_railway_patches\sitecustomize.py --ignore-missing-imports --check-untyped-defs --show-error-codes
+.\.venv\Scripts\python.exe -m pyright server.py nanobot_railway_patches\sitecustomize.py
 ```
 
 For container verification on a machine with Docker:

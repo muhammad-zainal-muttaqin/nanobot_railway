@@ -119,10 +119,16 @@ class GatewayManager:
         self.state = "starting"
         self._cleanup_read_tasks()
         try:
+            env = os.environ.copy()
+            patch_path = str(Path(__file__).parent / "nanobot_railway_patches")
+            env["PYTHONPATH"] = (
+                patch_path if not env.get("PYTHONPATH") else f"{patch_path}{os.pathsep}{env['PYTHONPATH']}"
+            )
             self.process = await asyncio.create_subprocess_exec(
                 "nanobot", "gateway",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                env=env,
             )
             self.state = "running"
             self.start_time = time.time()
@@ -296,15 +302,32 @@ def _package_version(package_name: str) -> str | None:
         return None
 
 
+def _telegram_bot_api_version() -> str | None:
+    try:
+        from telegram.constants import BOT_API_VERSION
+
+        return str(BOT_API_VERSION)
+    except Exception:
+        return None
+
+
 def runtime_versions() -> dict:
     ptb = _package_version("python-telegram-bot")
+    bot_api = _telegram_bot_api_version()
+    if bot_api == "10.0":
+        support = "Bot API 10.0 wrapper detected. Bot-to-bot transport is enabled when BotFather mode is enabled."
+    else:
+        support = (
+            f"Wrapper reports Bot API {bot_api or 'unknown'}; bot-to-bot sending can still use raw sendMessage, "
+            "but full Bot API 10.0 wrapper coverage is not proven."
+        )
     return {
         "nanobot_ai": _package_version("nanobot-ai"),
         "python_telegram_bot": ptb,
         "telegram_bot_api": {
             "target": "10.0",
-            "wrapper": ptb,
-            "support": "Bot API 10.0 features unavailable unless the installed wrapper supports them.",
+            "wrapper": bot_api,
+            "support": support,
         },
     }
 
@@ -413,6 +436,54 @@ async def api_status(request: Request):
     })
 
 
+async def api_telegram_bot_to_bot_send(request: Request):
+    auth_err = require_auth(request)
+    if auth_err:
+        return auth_err
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    target = str(body.get("target", "")).strip()
+    text = str(body.get("text", "")).strip()
+    if not re.fullmatch(r"@[A-Za-z0-9_]{5,32}", target):
+        return JSONResponse({"error": "target must be a Telegram bot username like @OtherBot"}, status_code=400)
+    if not text:
+        return JSONResponse({"error": "text is required"}, status_code=400)
+    if len(text) > 4096:
+        return JSONResponse({"error": "text must be 4096 characters or less"}, status_code=400)
+
+    data = _merged_config_data()
+    telegram_config = data.get("channels", {}).get("telegram", {})
+    token = telegram_config.get("token")
+    if not token or (isinstance(token, str) and token.endswith("***")):
+        return JSONResponse({"error": "Telegram token is not configured"}, status_code=400)
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": target, "text": text},
+            )
+        payload = response.json()
+    except Exception as e:
+        return JSONResponse({"error": f"Telegram request failed: {e}"}, status_code=502)
+
+    if not payload.get("ok"):
+        description = payload.get("description") or "Telegram rejected the request"
+        return JSONResponse({"error": description, "telegram": payload}, status_code=400)
+
+    return JSONResponse({
+        "ok": True,
+        "target": target,
+        "messageId": payload.get("result", {}).get("message_id"),
+    })
+
+
 async def api_logs(request: Request):
     auth_err = require_auth(request)
     if auth_err:
@@ -468,6 +539,7 @@ routes = [
     Route("/api/config", api_config_get, methods=["GET"]),
     Route("/api/config", api_config_put, methods=["PUT"]),
     Route("/api/status", api_status),
+    Route("/api/telegram/bot-to-bot/send", api_telegram_bot_to_bot_send, methods=["POST"]),
     Route("/api/logs", api_logs),
     Route("/api/gateway/start", api_gateway_start, methods=["POST"]),
     Route("/api/gateway/stop", api_gateway_stop, methods=["POST"]),

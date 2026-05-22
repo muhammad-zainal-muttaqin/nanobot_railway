@@ -454,8 +454,7 @@
                   class="w-full bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
                   x-model="config.channels.telegram.groupPolicy">
                   <option value="mention">Mention</option>
-                  <option value="all">All messages</option>
-                  <option value="ignore">Ignore groups</option>
+                  <option value="open">Open</option>
                 </select>
               </div>
               <div class="mt-4">
@@ -500,6 +499,38 @@
                 <input type="checkbox" class="accent-white" x-model="config.channels.telegram.inlineKeyboards">
                 <span class="text-xs text-gray-400">Inline keyboards</span>
               </label>
+              <label class="mt-2 flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" class="accent-white" x-model="config.channels.telegram.botToBot">
+                <span class="text-xs text-gray-400">Bot-to-bot receive mode</span>
+              </label>
+              <div>
+                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Allowed Bots</label>
+                <input type="text"
+                  class="w-full bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
+                  :value="(config.channels.telegram.botToBotAllowBots || []).join(', ')"
+                  @input="config.channels.telegram.botToBotAllowBots = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+                  placeholder="* or @OtherBot, 123456789">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Bot Messages / Minute</label>
+                <input type="number"
+                  class="w-full bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
+                  x-model.number="config.channels.telegram.botToBotMaxPerMinute">
+              </div>
+              <div class="md:col-span-2 border-t border-gray-800 pt-4 mt-2">
+                <div class="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-3">
+                  <input type="text"
+                    class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
+                    x-model="botToBot.target" placeholder="@OtherBot">
+                  <input type="text"
+                    class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
+                    x-model="botToBot.text" placeholder="Message to send">
+                  <button @click="sendBotToBot()" :disabled="botToBot.sending"
+                    class="px-4 py-2 bg-white text-black rounded-lg text-sm font-medium disabled:opacity-50">
+                    Send
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -901,6 +932,7 @@
         restartAfterSave: true,
         toast: { show: false, message: '', type: 'success' },
         customModels: {},
+        botToBot: { target: '', text: '', sending: false },
 
         providerList: [
           // Requested order: Gemini, Anthropic, Groq, OpenAI, then the rest.
@@ -1257,6 +1289,26 @@
           setTimeout(() => this.loadStatus(), 1000);
         },
 
+        async sendBotToBot() {
+          this.botToBot.sending = true;
+          try {
+            const res = await fetch('/api/telegram/bot-to-bot/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target: this.botToBot.target, text: this.botToBot.text }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+              this.showToast(`Sent to ${data.target}`, 'success');
+            } else {
+              this.showToast(data.error || 'Bot-to-bot send failed', 'error');
+            }
+          } catch (e) {
+            this.showToast('Bot-to-bot error: ' + e.message, 'error');
+          }
+          this.botToBot.sending = false;
+        },
+
         formatLogLine(line) {
           if (line.includes('ERROR')) return `<span class="text-red-400">🔥 ${line}</span>`;
           if (line.includes('WARN')) return `<span class="text-yellow-400">⚠️ ${line}</span>`;
@@ -1312,6 +1364,10 @@
             poolTimeout: 5,
             streamEditInterval: 1,
             proxy: null,
+            botToBot: false,
+            botToBotAllowBots: [],
+            botToBotMaxPerMinute: 12,
+            botToBotMaxChainDepth: 6,
           },
           whatsapp: { enabled: false, bridgeUrl: 'ws://localhost:3001', allowFrom: [] },
           feishu: { enabled: false, appId: '', appSecret: '', encryptKey: '', verificationToken: '', allowFrom: [] },

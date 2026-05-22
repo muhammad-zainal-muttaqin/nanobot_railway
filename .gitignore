@@ -7,3 +7,4 @@ __pycache__/
 .DS_Store
 temp
 nanobot-main
+.tmp-python-telegram-bot-v10/
