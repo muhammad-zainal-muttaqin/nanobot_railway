@@ -1,9 +1,13 @@
 import asyncio
 
+import httpx
+import pytest
+
 from telegram import Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update, User
 from telegram.constants import BOT_API_VERSION, BOT_API_VERSION_INFO
 from telegram._application import Application
 from telegram._bot import _parse_update
+from telegram.error import BadRequest, NetworkError, RetryAfter
 from telegram.ext import MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -21,6 +25,7 @@ class FakeResponse:
 class FakeClient:
     def __init__(self):
         self.calls = []
+        self.closed = False
 
     async def post(self, url, json=None, data=None, files=None):
         method = url.rsplit("/", 1)[-1]
@@ -40,6 +45,9 @@ class FakeClient:
                 }
             )
         return FakeResponse(True)
+
+    async def aclose(self):
+        self.closed = True
 
 
 def run(coro):
@@ -322,6 +330,84 @@ def test_call_api_reaches_any_official_method_name():
     assert client.calls[0][0] == "getMyStarBalance"
 
 
+def test_http_errors_redact_token_and_map_request_errors():
+    class RaisingClient:
+        async def post(self, url, json=None, data=None, files=None):
+            request = httpx.Request("POST", url)
+            raise httpx.ConnectError(f"failed {url}", request=request)
+
+    bot = Bot("123:secret-token", request=RaisingClient())
+
+    with pytest.raises(NetworkError) as exc:
+        run(bot.get_me())
+
+    assert "123:secret-token" not in str(exc.value)
+    assert "<redacted-token>" in str(exc.value)
+
+
+def test_invalid_json_diagnostics_redact_token():
+    class InvalidJsonResponse:
+        status_code = 502
+        text = "upstream mentioned 123:secret-token and /bot123:secret-token/getMe"
+
+        def json(self):
+            raise ValueError("not json")
+
+    class InvalidJsonClient:
+        async def post(self, url, json=None, data=None, files=None):
+            return InvalidJsonResponse()
+
+    bot = Bot("123:secret-token", request=InvalidJsonClient())
+
+    with pytest.raises(NetworkError) as exc:
+        run(bot.get_me())
+
+    assert "123:secret-token" not in str(exc.value)
+    assert "Invalid JSON from Telegram API getMe" in str(exc.value)
+
+
+def test_bot_api_error_mapping_handles_retry_and_ok_false_status_200():
+    class ApiErrorResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "ok": False,
+                "description": "Too Many Requests: retry later",
+                "parameters": {"retry_after": 4},
+            }
+
+    class ApiErrorClient:
+        async def post(self, url, json=None, data=None, files=None):
+            return ApiErrorResponse()
+
+    bot = Bot("123:token", request=ApiErrorClient())
+
+    with pytest.raises(RetryAfter) as exc:
+        run(bot.get_me())
+
+    assert exc.value.retry_after == 4
+
+
+def test_bot_api_ok_false_status_200_without_retry_is_bad_request():
+    class ApiErrorResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"ok": False, "description": "Bad request"}
+
+    class ApiErrorClient:
+        async def post(self, url, json=None, data=None, files=None):
+            return ApiErrorResponse()
+
+    bot = Bot("123:token", request=ApiErrorClient())
+
+    with pytest.raises(BadRequest):
+        run(bot.get_me())
+
+
 def test_media_file_id_string_is_sent_without_upload():
     client = FakeClient()
     bot = Bot("123:token", request=client)
@@ -450,5 +536,27 @@ def test_updater_stop_matches_nanobot_lifecycle():
         assert app._running is True
         await app.updater.stop()
         assert app._running is False
+
+    run(scenario())
+
+
+def test_application_shutdown_cancels_polling_and_closes_builder_clients():
+    async def scenario():
+        api_request = FakeClient()
+        poll_request = FakeClient()
+        app = (
+            Application.builder()
+            .token("123:token")
+            .request(api_request)
+            .get_updates_request(poll_request)
+            .build()
+        )
+        await app.updater.start_polling(allowed_updates=["message"])
+
+        assert app._polling_task is not None
+        await app.shutdown()
+        assert app._polling_task is None
+        assert api_request.closed is True
+        assert poll_request.closed is True
 
     run(scenario())

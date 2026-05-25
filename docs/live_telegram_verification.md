@@ -84,12 +84,15 @@ The live requirement is complete when:
 - For private bot-to-bot send proof, output includes `bot_to_bot_send`.
 - For receive proof, output includes `bot_to_bot_receive={'matched': True, ...}`.
 
-For the final proof run, set strict bot-to-bot mode so the verifier fails unless both send and receive evidence are present:
+For the final proof run, set strict bot-to-bot mode so the verifier fails unless private send, receive, and group/topic evidence are present:
 
 ```powershell
 $env:TELEGRAM_BOT_TOKEN="123456:ABC..."
 $env:TELEGRAM_BOT_TO_BOT_TARGET="@OtherBot"
 $env:TELEGRAM_EXPECT_BOT_UPDATE_FROM="@OtherBot"
+$env:TELEGRAM_GROUP_CHAT_ID="-1001234567890"
+# Optional for forum topics:
+# $env:TELEGRAM_MESSAGE_THREAD_ID="123"
 $env:TELEGRAM_UPDATE_POLL_SECONDS="30"
 $env:TELEGRAM_REQUIRE_BOT_TO_BOT="1"
 .\.venv\Scripts\python.exe scripts\verify_telegram_live.py

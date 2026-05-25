@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from typing import Any, Callable
 
 from telegram._bot import Bot
@@ -51,13 +52,14 @@ class Updater:
 class Application:
     """PTB-compatible Application with polling loop."""
 
-    def __init__(self, bot: Bot):
+    def __init__(self, bot: Bot, managed_clients: list[Any] | None = None):
         self.bot = bot
         self.updater = Updater(self)
         self._handlers: list[BaseHandler] = []
         self._error_handlers: list[Callable[[object, Any], None]] = []
         self._running = False
         self._polling_task: asyncio.Task | None = None
+        self._managed_clients = managed_clients or []
 
     @classmethod
     def builder(cls) -> "ApplicationBuilder":
@@ -77,12 +79,32 @@ class Application:
 
     async def stop(self) -> None:
         self._running = False
+        await self._cancel_polling_task()
 
     async def shutdown(self) -> None:
         self._running = False
-        if self._polling_task and not self._polling_task.done():
-            self._polling_task.cancel()
+        await self._cancel_polling_task()
         await self.bot._close_client()
+        await self._close_managed_clients()
+
+    async def _cancel_polling_task(self) -> None:
+        task = self._polling_task
+        if task and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        self._polling_task = None
+
+    async def _close_managed_clients(self) -> None:
+        closed: set[int] = set()
+        for client in self._managed_clients:
+            if client is None or id(client) in closed:
+                continue
+            close = getattr(client, "aclose", None)
+            if close is None:
+                continue
+            closed.add(id(client))
+            await close()
 
     async def process_update(self, update: Any) -> None:
         for handler in self._handlers:
@@ -110,6 +132,7 @@ class Application:
     ) -> None:
         """Start the long-polling update loop as a background task."""
         self._error_callback = error_callback
+        self._running = True
         allowed_updates = _expand_allowed_updates(allowed_updates)
         self._polling_task = asyncio.create_task(
             self._polling_loop(allowed_updates=allowed_updates,
@@ -158,6 +181,7 @@ class ApplicationBuilder:
     def __init__(self):
         self._token: str | None = None
         self._request: Any = None
+        self._get_updates_request: Any = None
 
     def token(self, token: str) -> "ApplicationBuilder":
         self._token = token
@@ -168,9 +192,14 @@ class ApplicationBuilder:
         return self
 
     def get_updates_request(self, request: Any) -> "ApplicationBuilder":
-        # PTB uses separate pools for polling vs API — we ignore the distinction.
+        self._get_updates_request = request
         return self
 
     def build(self) -> Application:
         bot = Bot(token=self._token or "", request=self._request)
-        return Application(bot)
+        managed_clients = [
+            client
+            for client in (self._request, self._get_updates_request)
+            if client is not None
+        ]
+        return Application(bot, managed_clients=managed_clients)

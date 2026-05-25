@@ -62,6 +62,51 @@ def test_bot_to_bot_send_includes_optional_chain_depth(monkeypatch):
     assert response.json()["botToBotChainDepth"] == 2
 
 
+def test_bot_to_bot_send_accepts_group_chat_id_alias(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def json(self):
+            return {"ok": True, "result": {"message_id": 124, "message_thread_id": 77}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(server, "_merged_config_data", lambda: {"channels": {"telegram": {"token": "123:abc"}}})
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/api/telegram/bot-to-bot/send",
+        headers=_auth_header(),
+        json={
+            "target": "@OtherBot",
+            "groupChatId": "-10012345",
+            "messageThreadId": "77",
+            "text": "/ping@OtherBot hi",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["json"]["chat_id"] == "-10012345"
+    assert captured["json"]["message_thread_id"] == 77
+    assert response.json()["groupChatId"] == -10012345
+
+
 def test_bot_to_bot_send_rejects_invalid_chain_depth():
     client = TestClient(server.app)
 
@@ -73,3 +118,35 @@ def test_bot_to_bot_send_rejects_invalid_chain_depth():
 
     assert response.status_code == 400
     assert response.json()["error"] == "botToBotChainDepth must be numeric when provided"
+
+
+def test_bot_to_bot_send_redacts_token_from_errors(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json):
+            raise RuntimeError(f"failed {url}")
+
+    monkeypatch.setattr(server, "_merged_config_data", lambda: {"channels": {"telegram": {"token": "123:abc"}}})
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/api/telegram/bot-to-bot/send",
+        headers=_auth_header(),
+        json={"target": "@OtherBot", "text": "hello"},
+    )
+
+    assert response.status_code == 502
+    assert "123:abc" not in response.json()["error"]
+    assert "<redacted-token>" in response.json()["error"]

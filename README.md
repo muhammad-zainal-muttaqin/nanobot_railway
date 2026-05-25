@@ -188,7 +188,7 @@ Or run all local gates together:
 
 `scripts\verify_gateway_offline.py` starts `nanobot gateway` with a temporary config, no enabled chat channels, and a dummy provider key; it succeeds if the gateway reaches runtime without importing `python-telegram-bot`.
 
-`scripts\verify_telegram_live.py` skips cleanly without credentials. For live Telegram proof, set `TELEGRAM_BOT_TOKEN`; set `TELEGRAM_BOT_TO_BOT_TARGET=@OtherBot` after enabling Bot-to-Bot Communication Mode for both bots in BotFather to test private bot-to-bot delivery. To prove receive-side bot-to-bot delivery, set `TELEGRAM_EXPECT_BOT_UPDATE_FROM=@OtherBot`, send a message from that bot to this bot, and run the verifier within `TELEGRAM_UPDATE_POLL_SECONDS`. For the final bot-to-bot proof, also set `TELEGRAM_REQUIRE_BOT_TO_BOT=1`; the verifier will fail unless both send and receive evidence are present.
+`scripts\verify_telegram_live.py` skips cleanly without credentials. For live Telegram proof, set `TELEGRAM_BOT_TOKEN`; set `TELEGRAM_BOT_TO_BOT_TARGET=@OtherBot` after enabling Bot-to-Bot Communication Mode for both bots in BotFather to test private bot-to-bot delivery. To prove receive-side bot-to-bot delivery, set `TELEGRAM_EXPECT_BOT_UPDATE_FROM=@OtherBot`, send a message from that bot to this bot, and run the verifier within `TELEGRAM_UPDATE_POLL_SECONDS`. For the final bot-to-bot proof, also set `TELEGRAM_GROUP_CHAT_ID` and `TELEGRAM_REQUIRE_BOT_TO_BOT=1`; the verifier will fail unless private send, receive, and group/topic evidence are present.
 The full live verification runbook is in `docs/live_telegram_verification.md`.
 
 For container verification on a machine with Docker:

@@ -54,7 +54,11 @@ def test_live_verify_required_bot_to_bot_fails_when_evidence_is_missing(monkeypa
     assert code == 1
     assert report["status"] == "failed"
     assert report["reason"] == "required bot-to-bot proof is incomplete"
-    assert report["missing"] == ["TELEGRAM_BOT_TO_BOT_TARGET", "TELEGRAM_EXPECT_BOT_UPDATE_FROM"]
+    assert report["missing"] == [
+        "TELEGRAM_BOT_TO_BOT_TARGET",
+        "TELEGRAM_EXPECT_BOT_UPDATE_FROM",
+        "TELEGRAM_GROUP_CHAT_ID",
+    ]
 
 
 def test_live_verify_required_bot_to_bot_passes_with_send_and_receive(monkeypatch):
@@ -69,7 +73,7 @@ def test_live_verify_required_bot_to_bot_passes_with_send_and_receive(monkeypatc
             assert method == "getMe"
             return {"id": 1}
 
-        async def send_message(self, chat_id, text):
+        async def send_message(self, chat_id, text, **kwargs):
             return Message(message_id=9, date=1, chat=Chat(id=2, type="private"), text=text)
 
         async def _close_client(self):
@@ -86,12 +90,40 @@ def test_live_verify_required_bot_to_bot_passes_with_send_and_receive(monkeypatc
         "TELEGRAM_REQUIRE_BOT_TO_BOT": "1",
         "TELEGRAM_BOT_TO_BOT_TARGET": "@OtherBot",
         "TELEGRAM_EXPECT_BOT_UPDATE_FROM": "@OtherBot",
+        "TELEGRAM_GROUP_CHAT_ID": "-10012345",
     }))
 
     assert code == 0
     assert report["status"] == "ok"
     assert report["bot_to_bot_send"]["target"] == "@OtherBot"
     assert report["bot_to_bot_receive"]["matched"] is True
+    assert report["group_send"]["chat_id"] == 2
+
+
+def test_live_verify_rejects_invalid_bot_to_bot_target(monkeypatch):
+    class FakeBot:
+        def __init__(self, token):
+            self.token = token
+
+        async def get_me(self):
+            return User(id=1, is_bot=True, first_name="Native", username="NativeBot")
+
+        async def call_api(self, method):
+            return {"id": 1}
+
+        async def _close_client(self):
+            pass
+
+    monkeypatch.setattr(live, "Bot", FakeBot)
+
+    code, report = asyncio.run(verify_live({
+        "TELEGRAM_BOT_TOKEN": "123:token",
+        "TELEGRAM_BOT_TO_BOT_TARGET": "not valid",
+    }))
+
+    assert code == 1
+    assert report["status"] == "failed"
+    assert report["reason"] == "TELEGRAM_BOT_TO_BOT_TARGET must be @BotUsername or numeric chat ID"
 
 
 def test_expected_bot_update_matching_accepts_username_or_id():

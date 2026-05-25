@@ -221,6 +221,17 @@ def _is_secret_field(name: str) -> bool:
     return any(part in normalized for part in ("apikey", "token", "secret", "password"))
 
 
+def _redact_telegram_token(value: Any, token: str) -> Any:
+    if isinstance(value, dict):
+        return {key: _redact_telegram_token(item, token) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_telegram_token(item, token) for item in value]
+    if isinstance(value, str):
+        text = value.replace(token, "<redacted-token>") if token else value
+        return re.sub(r"/bot[^/\s]+/", "/bot<redacted-token>/", text)
+    return value
+
+
 def _load_raw_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         return {}
@@ -472,6 +483,7 @@ async def api_telegram_bot_to_bot_send(request: Request):
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
     target = str(body.get("target", "")).strip()
+    group_chat_id = body.get("groupChatId")
     text = str(body.get("text", "")).strip()
     message_thread_id = body.get("messageThreadId")
     chain_depth = body.get("botToBotChainDepth")
@@ -481,10 +493,18 @@ async def api_telegram_bot_to_bot_send(request: Request):
         return JSONResponse({
             "error": "target must be a Telegram bot username like @OtherBot or a numeric group chat ID"
         }, status_code=400)
+    if group_chat_id in ("", None):
+        group_chat_id = None
+    elif not re.fullmatch(r"-?\d{5,32}", str(group_chat_id).strip()):
+        return JSONResponse({"error": "groupChatId must be numeric when provided"}, status_code=400)
+    if group_chat_id is not None and not direct_bot_target:
+        return JSONResponse({"error": "groupChatId requires target to be a bot username"}, status_code=400)
     if message_thread_id in ("", None):
         message_thread_id = None
     elif not re.fullmatch(r"\d{1,32}", str(message_thread_id).strip()):
         return JSONResponse({"error": "messageThreadId must be numeric when provided"}, status_code=400)
+    if message_thread_id is not None and group_chat_id is None and not group_chat_target:
+        return JSONResponse({"error": "messageThreadId requires a numeric group chat target or groupChatId"}, status_code=400)
     if not text:
         return JSONResponse({"error": "text is required"}, status_code=400)
     if len(text) > 4096:
@@ -507,7 +527,8 @@ async def api_telegram_bot_to_bot_send(request: Request):
     try:
         import httpx
 
-        payload_json: dict[str, Any] = {"chat_id": target, "text": text}
+        send_chat_id = str(group_chat_id).strip() if group_chat_id is not None else target
+        payload_json: dict[str, Any] = {"chat_id": send_chat_id, "text": text}
         if message_thread_id is not None:
             payload_json["message_thread_id"] = int(str(message_thread_id).strip())
         async with httpx.AsyncClient(timeout=30) as client:
@@ -517,15 +538,20 @@ async def api_telegram_bot_to_bot_send(request: Request):
             )
         payload = response.json()
     except Exception as e:
-        return JSONResponse({"error": f"Telegram request failed: {e}"}, status_code=502)
+        return JSONResponse({"error": f"Telegram request failed: {_redact_telegram_token(str(e), token)}"}, status_code=502)
 
     if not payload.get("ok"):
-        description = payload.get("description") or "Telegram rejected the request"
-        return JSONResponse({"error": description, "telegram": payload}, status_code=400)
+        sanitized = _redact_telegram_token(payload, token)
+        description = sanitized.get("description") if isinstance(sanitized, dict) else None
+        return JSONResponse({
+            "error": description or "Telegram rejected the request",
+            "telegram": sanitized,
+        }, status_code=400)
 
     return JSONResponse({
         "ok": True,
         "target": target,
+        "groupChatId": int(str(group_chat_id).strip()) if group_chat_id is not None else None,
         "messageId": payload.get("result", {}).get("message_id"),
         "messageThreadId": payload.get("result", {}).get("message_thread_id"),
         "botToBotChainDepth": int(str(chain_depth).strip()) if chain_depth is not None else None,

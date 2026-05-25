@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+import re
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,13 @@ from telegram._types import (
 )
 
 _BOT_INSTANCE: contextvars.ContextVar["Bot | None"] = contextvars.ContextVar("_BOT_INSTANCE", default=None)
+
+
+def _redact_token(text: object, token: str) -> str:
+    value = str(text)
+    if token:
+        value = value.replace(token, "<redacted-token>")
+    return re.sub(r"/bot[^/\s]+/", "/bot<redacted-token>/", value)
 
 
 def _parse_update(data: dict) -> Update:
@@ -153,7 +161,7 @@ class Bot:
         method: str,
         params: dict[str, Any] | None = None,
         files: dict[str, tuple[str, bytes, str]] | None = None,
-    ) -> dict:
+    ) -> Any:
         url = self.BASE_URL.format(token=self.token, method=method)
         try:
             if files:
@@ -171,21 +179,27 @@ class Bot:
                             body[k] = _serialize(v)
                 resp = await self._client.post(url, json=body)
         except httpx.TimeoutException as e:
-            raise TimedOut(str(e))
-        except httpx.NetworkError as e:
-            raise NetworkError(str(e))
+            raise TimedOut(_redact_token(e, self.token)) from e
+        except httpx.RequestError as e:
+            raise NetworkError(_redact_token(e, self.token)) from e
 
         try:
             data = resp.json()
-        except Exception:
-            raise NetworkError(f"Invalid JSON: {resp.text[:500]}")
+        except Exception as e:
+            body = _redact_token(getattr(resp, "text", "")[:500], self.token)
+            raise NetworkError(f"Invalid JSON from Telegram API {method}: {body}") from e
+
+        if not isinstance(data, dict):
+            raise NetworkError(f"Invalid Telegram API envelope for {method}")
 
         if not data.get("ok"):
             raise_for_status(
                 resp.status_code,
-                data.get("description", ""),
+                _redact_token(data.get("description", ""), self.token),
                 data.get("parameters"),
             )
+        if "result" not in data:
+            raise NetworkError(f"Telegram API response for {method} is missing result")
         return data["result"]
 
     # ═══════════════════════════════════════════
@@ -1454,10 +1468,10 @@ class Bot:
                 resp = await self._client.get(url)
                 resp.raise_for_status()
                 Path(path).write_bytes(resp.content)
-            except httpx.TimeoutException:
-                raise TimedOut(str(url))
-            except httpx.NetworkError as e:
-                raise NetworkError(str(e))
+            except httpx.TimeoutException as e:
+                raise TimedOut(_redact_token(e, self.token)) from e
+            except httpx.RequestError as e:
+                raise NetworkError(_redact_token(e, self.token)) from e
 
         object.__setattr__(file_obj, "download_to_drive", download_to_drive)
         return file_obj

@@ -62,12 +62,13 @@ To prove the remaining live requirement, run:
 $env:TELEGRAM_BOT_TOKEN="123456:ABC..."
 $env:TELEGRAM_BOT_TO_BOT_TARGET="@OtherBot"
 $env:TELEGRAM_EXPECT_BOT_UPDATE_FROM="@OtherBot"
+$env:TELEGRAM_GROUP_CHAT_ID="-1001234567890"
 $env:TELEGRAM_UPDATE_POLL_SECONDS="20"
 $env:TELEGRAM_REQUIRE_BOT_TO_BOT="1"
 .\.venv\Scripts\python.exe scripts\verify_telegram_live.py
 ```
 
-For group/topic verification, also set:
+For forum topic verification, also set:
 
 ```powershell
 $env:TELEGRAM_GROUP_CHAT_ID="-1001234567890"

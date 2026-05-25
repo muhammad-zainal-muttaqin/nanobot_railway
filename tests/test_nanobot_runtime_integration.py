@@ -6,6 +6,7 @@ if str(PATCH_DIR) not in sys.path:
     sys.path.insert(0, str(PATCH_DIR))
 
 import sitecustomize  # noqa: F401
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.telegram import TelegramChannel
 from telegram import Chat, Message, Update, User
@@ -30,6 +31,21 @@ def test_railway_patch_adds_bot_to_bot_runtime_config():
     assert channel.config.bot_to_bot_max_chain_depth == 3
     assert channel.is_allowed("bot:123|OtherBot")
     assert not channel.is_allowed("bot:123|BlockedBot")
+
+
+def test_bot_allowlist_normalizes_internal_sender_forms():
+    channel = TelegramChannel(
+        {
+            "enabled": True,
+            "token": "",
+            "botToBot": True,
+            "botToBotAllowBots": ["bot:123|OtherBot"],
+        },
+        MessageBus(),
+    )
+
+    assert channel.is_allowed("bot:123|OtherBot")
+    assert channel.is_allowed("bot:123|@OtherBot")
 
 
 def test_nanobot_telegram_channel_uses_repo_native_package():
@@ -314,6 +330,123 @@ def test_bot_to_bot_rate_limit_drops_after_configured_count():
     first, remaining = asyncio.run(scenario())
     assert first.content == "first"
     assert remaining == 0
+
+
+def test_bot_to_bot_duplicate_message_is_dropped():
+    async def scenario():
+        bus = MessageBus()
+        channel = TelegramChannel(
+            {
+                "enabled": True,
+                "token": "",
+                "allowFrom": ["*"],
+                "botToBot": True,
+                "botToBotAllowBots": ["@OtherBot"],
+            },
+            bus,
+        )
+
+        async def no_media(*args, **kwargs):
+            return [], []
+
+        async def no_reaction(*args, **kwargs):
+            return None
+
+        channel._download_message_media = no_media
+        channel._add_reaction = no_reaction
+        channel._start_typing = lambda *args, **kwargs: None
+
+        update = Update(
+            update_id=80,
+            guest_message=Message(
+                message_id=20,
+                date=1,
+                chat=Chat(id=108, type="private"),
+                from_user=User(id=208, is_bot=True, first_name="Other", username="OtherBot"),
+                text="same",
+            ),
+        )
+
+        await channel._on_message(update, object())
+        await channel._on_message(update, object())
+        first = await bus.consume_inbound()
+        return first, bus.inbound_size
+
+    import asyncio
+
+    first, remaining = asyncio.run(scenario())
+    assert first.content == "same"
+    assert remaining == 0
+
+
+def test_bot_to_bot_reply_increments_chain_depth_marker():
+    async def scenario():
+        bus = MessageBus()
+        channel = TelegramChannel(
+            {
+                "enabled": True,
+                "token": "",
+                "allowFrom": ["*"],
+                "botToBot": True,
+                "botToBotAllowBots": ["@OtherBot"],
+                "botToBotMaxChainDepth": 5,
+            },
+            bus,
+        )
+
+        async def no_media(*args, **kwargs):
+            return [], []
+
+        async def no_reaction(*args, **kwargs):
+            return None
+
+        channel._download_message_media = no_media
+        channel._add_reaction = no_reaction
+        channel._start_typing = lambda *args, **kwargs: None
+
+        update = Update(
+            update_id=81,
+            guest_message=Message(
+                message_id=21,
+                date=1,
+                chat=Chat(id=109, type="private"),
+                from_user=User(id=209, is_bot=True, first_name="Other", username="OtherBot"),
+                text="[nanobot:b2b-depth=2] prompt",
+            ),
+        )
+
+        await channel._on_message(update, object())
+        inbound = await bus.consume_inbound()
+        sent = {}
+
+        class FakeBot:
+            async def send_message(self, **kwargs):
+                sent.update(kwargs)
+                return Message(
+                    message_id=22,
+                    date=1,
+                    chat=Chat(id=kwargs["chat_id"], type="private"),
+                    text=kwargs["text"],
+                )
+
+        class FakeApp:
+            bot = FakeBot()
+
+        channel._app = FakeApp()
+        await channel.send(
+            OutboundMessage(
+                channel="telegram",
+                chat_id="109",
+                content="reply",
+                metadata={"origin_message_id": inbound.metadata["origin_message_id"]},
+            )
+        )
+        return sent["text"]
+
+    import asyncio
+
+    text = asyncio.run(scenario())
+    assert text.startswith("[nanobot:b2b-depth=3] reply")
 
 
 def test_bot_to_bot_ignores_own_bot_messages():

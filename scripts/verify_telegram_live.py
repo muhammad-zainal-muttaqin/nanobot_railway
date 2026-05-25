@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata as metadata
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -38,6 +39,23 @@ def _ptb_installed() -> bool:
 
 def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _redact_secret(value: object, token: str | None = None) -> str:
+    text = str(value)
+    if token:
+        text = text.replace(token, "<redacted-token>")
+    return re.sub(r"/bot[^/\s]+/", "/bot<redacted-token>/", text)
+
+
+def _validate_target(value: str) -> bool:
+    return bool(re.fullmatch(r"@[A-Za-z0-9_]{5,32}", value) or re.fullmatch(r"-?\d{5,32}", value))
+
+
+def _parse_int_env(name: str, value: str) -> int:
+    if not re.fullmatch(r"-?\d{1,32}", value.strip()):
+        raise ValueError(f"{name} must be numeric")
+    return int(value)
 
 
 async def verify_live(env: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
@@ -74,6 +92,10 @@ async def verify_live(env: dict[str, str] | None = None) -> tuple[int, dict[str,
 
         target = env.get("TELEGRAM_BOT_TO_BOT_TARGET", "").strip()
         if target:
+            if not _validate_target(target):
+                checks["status"] = "failed"
+                checks["reason"] = "TELEGRAM_BOT_TO_BOT_TARGET must be @BotUsername or numeric chat ID"
+                return 1, checks
             sent = await bot.send_message(target, "native Bot API v10 live bot-to-bot verification")
             checks["bot_to_bot_send"] = {
                 "target": target,
@@ -86,9 +108,9 @@ async def verify_live(env: dict[str, str] | None = None) -> tuple[int, dict[str,
             params: dict[str, Any] = {}
             thread_id = env.get("TELEGRAM_MESSAGE_THREAD_ID", "").strip()
             if thread_id:
-                params["message_thread_id"] = int(thread_id)
+                params["message_thread_id"] = _parse_int_env("TELEGRAM_MESSAGE_THREAD_ID", thread_id)
             sent = await bot.send_message(
-                int(group_chat_id),
+                _parse_int_env("TELEGRAM_GROUP_CHAT_ID", group_chat_id),
                 "native Bot API v10 live group verification",
                 **params,
             )
@@ -111,6 +133,8 @@ async def verify_live(env: dict[str, str] | None = None) -> tuple[int, dict[str,
                 missing.append("TELEGRAM_BOT_TO_BOT_TARGET")
             if "bot_to_bot_receive" not in checks:
                 missing.append("TELEGRAM_EXPECT_BOT_UPDATE_FROM")
+            if "group_send" not in checks:
+                missing.append("TELEGRAM_GROUP_CHAT_ID")
             if missing:
                 checks["status"] = "failed"
                 checks["reason"] = "required bot-to-bot proof is incomplete"
@@ -170,8 +194,9 @@ def main() -> int:
     try:
         code, report = asyncio.run(verify_live())
     except Exception as exc:
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
         print(f"status=failed")
-        print(f"error={type(exc).__name__}: {exc}")
+        print(f"error={type(exc).__name__}: {_redact_secret(exc, token)}")
         return 1
     _print_report(report)
     return code

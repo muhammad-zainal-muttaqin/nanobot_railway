@@ -5,12 +5,15 @@ from __future__ import annotations
 import importlib.metadata as metadata
 import os
 import shutil
+import sys
 from pathlib import Path
-
-from telegram.constants import BOT_API_VERSION
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from telegram.constants import BOT_API_VERSION
 
 
 def _ptb_installed() -> bool:
@@ -34,6 +37,7 @@ def completion_items(env: dict[str, str] | None = None) -> list[tuple[str, str, 
             "TELEGRAM_BOT_TOKEN",
             "TELEGRAM_BOT_TO_BOT_TARGET",
             "TELEGRAM_EXPECT_BOT_UPDATE_FROM",
+            "TELEGRAM_GROUP_CHAT_ID",
         )
     )
     docker_available = shutil.which("docker") is not None
@@ -78,7 +82,7 @@ def completion_items(env: dict[str, str] | None = None) -> list[tuple[str, str, 
         (
             "strict_live_bot_to_bot_env",
             "external" if not has_strict_b2b_env else "ready",
-            "target and expected sender set" if has_strict_b2b_env else "target/sender/token incomplete",
+            "target, expected sender, and group set" if has_strict_b2b_env else "target/sender/group/token incomplete",
         ),
         (
             "docker_runtime_available",
