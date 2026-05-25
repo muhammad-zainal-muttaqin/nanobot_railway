@@ -1,6 +1,6 @@
 # Telegram Bot API v10 Completion Audit
 
-Current status: locally implemented and verified; live Telegram credential checks remain external.
+Current status: locally implemented and verified; private live bot-to-bot proof passed on May 25, 2026. Group/topic live proof and Docker image build/run remain external.
 
 ## Requirements And Evidence
 
@@ -18,8 +18,9 @@ Current status: locally implemented and verified; live Telegram credential check
 | Prevent bot-to-bot loops locally | Tests prove allowlist enforcement, per-bot rate limiting via `botToBotMaxPerMinute`, self-bot suppression, optional `[nanobot:b2b-depth=N]` marker stripping/metadata, and drop behavior at `botToBotMaxChainDepth`. | Proven locally |
 | Ensure nanobot gateway uses native `telegram/` package | Gateway subprocess prepends repo root and patch dir to `PYTHONPATH`; tests verify path order; runtime tests verify `telegram.__file__` resolves to repo-local package. | Proven locally |
 | Prove nanobot gateway starts without PTB | `scripts/verify_gateway_offline.py` starts real `nanobot gateway` with temporary config, reaches tool registration, and reports PTB absent. | Proven locally |
-| Prove live Telegram API connectivity | `scripts/verify_telegram_live.py` verifies `getMe` and optional bot-to-bot/group sends when credentials are supplied. Current run skips because `TELEGRAM_BOT_TOKEN` is not set. | Missing external credentials |
-| Prove private bot-to-bot delivery through Telegram | Requires `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_TO_BOT_TARGET=@OtherBot`, optional `TELEGRAM_EXPECT_BOT_UPDATE_FROM=@OtherBot`, and Bot-to-Bot Communication Mode enabled for both bots in BotFather. | Missing external credentials |
+| Prove live Telegram API connectivity | `scripts/verify_telegram_live.py` verified `getMe` with `@grokinclaw_bot` on May 25, 2026. The token was not stored in the repository and must be rotated after testing. | Proven live |
+| Prove private bot-to-bot delivery through Telegram | On May 25, 2026, `@grokinclaw_bot` successfully sent private bot-to-bot messages to `@AkuHolo_bot` and `@S_o_R_a_bot`, then received bot-origin updates back from both bots. | Proven live |
+| Prove group/topic bot-to-bot delivery through Telegram | Requires `TELEGRAM_GROUP_CHAT_ID` as a negative group/supergroup ID, optional `TELEGRAM_MESSAGE_THREAD_ID`, both bots in the group, and Bot-to-Bot Communication Mode enabled in BotFather. | Missing external group/topic ID |
 | Prove Docker image behavior | Manifest tests verify Dockerfile copies native package, uninstalls PTB, and sets `PYTHONPATH`; Docker is not installed in this environment, so image build/run is not locally proven. | Partially proven |
 
 ## Verification Commands
@@ -75,4 +76,4 @@ $env:TELEGRAM_GROUP_CHAT_ID="-1001234567890"
 $env:TELEGRAM_MESSAGE_THREAD_ID="123"
 ```
 
-Completion can be claimed only after the live verifier returns `status=ok` with real Telegram credentials and, for private bot-to-bot, BotFather bot-to-bot mode enabled on both bots.
+Full production completion can be claimed only after the live verifier returns `status=ok` with real Telegram credentials, private bot-to-bot proof, and group/topic proof.
