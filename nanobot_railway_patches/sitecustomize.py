@@ -10,7 +10,14 @@ from __future__ import annotations
 import time
 from collections import defaultdict, deque
 import re
+import sys
+from pathlib import Path
 from typing import Any
+
+
+_APP_ROOT = Path(__file__).resolve().parent.parent
+if str(_APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_APP_ROOT))
 
 
 def _patch_telegram_channel() -> None:
@@ -26,6 +33,7 @@ def _patch_telegram_channel() -> None:
         r"^/(?!start(?:@\w+)?(?:\s|$)|help(?:@\w+)?(?:\s|$))"
         r"[A-Za-z0-9_]+(?:@\w+)?(?:\s+.*)?$"
     )
+    chain_depth_re = re.compile(r"\s*\[nanobot:b2b-depth=(\d+)\]\s*", re.IGNORECASE)
 
     original_init = TelegramChannel.__init__
     original_is_allowed = TelegramChannel.is_allowed
@@ -74,6 +82,8 @@ def _patch_telegram_channel() -> None:
         meta["is_bot"] = bool(getattr(user, "is_bot", False))
         if getattr(user, "username", None):
             meta["sender_username"] = user.username
+        if hasattr(message, "_bot_to_bot_chain_depth"):
+            meta["bot_to_bot_chain_depth"] = getattr(message, "_bot_to_bot_chain_depth")
         return meta
 
     def _bot_allowed(self: Any, user: Any) -> bool:
@@ -101,6 +111,53 @@ def _patch_telegram_channel() -> None:
             or str(sender_id).lower() in normalized
         )
 
+    def _ensure_legacy_message(update: Any) -> Any:
+        if getattr(update, "message", None) is not None:
+            return update
+        effective = getattr(update, "effective_message", None)
+        if effective is None:
+            return update
+        try:
+            object.__setattr__(update, "message", effective)
+        except Exception:
+            try:
+                setattr(update, "message", effective)
+            except Exception:
+                pass
+        return update
+
+    def _apply_chain_depth_marker(message: Any) -> int:
+        depth = 0
+        for field_name in ("text", "caption"):
+            value = getattr(message, field_name, None)
+            if not isinstance(value, str):
+                continue
+            match = chain_depth_re.search(value)
+            if not match:
+                continue
+            depth = max(depth, int(match.group(1)))
+            cleaned = chain_depth_re.sub(" ", value).strip()
+            try:
+                object.__setattr__(message, field_name, cleaned)
+            except Exception:
+                try:
+                    setattr(message, field_name, cleaned)
+                except Exception:
+                    pass
+        try:
+            object.__setattr__(message, "_bot_to_bot_chain_depth", depth)
+        except Exception:
+            try:
+                setattr(message, "_bot_to_bot_chain_depth", depth)
+            except Exception:
+                pass
+        return depth
+
+    def _chain_depth_exceeded(self: Any, message: Any) -> bool:
+        depth = _apply_chain_depth_marker(message)
+        max_depth = int(_config_value(self.config, "bot_to_bot_max_chain_depth", default=6) or 6)
+        return max_depth > 0 and depth >= max_depth
+
     def patched_is_allowed(self: Any, sender_id: str) -> bool:
         if _is_bot_sender_id(sender_id):
             if _bot_sender_allowed_by_id(self, sender_id):
@@ -124,8 +181,10 @@ def _patch_telegram_channel() -> None:
         return False
 
     async def patched_on_message(self, update: Any, context: Any) -> None:
+        update = _ensure_legacy_message(update)
         user = getattr(update, "effective_user", None)
         if user is not None and getattr(user, "is_bot", False):
+            message = getattr(update, "message", None)
             bot_id, _ = await self._ensure_bot_identity()
             if bot_id and getattr(user, "id", None) == bot_id:
                 return
@@ -138,11 +197,16 @@ def _patch_telegram_channel() -> None:
             if _rate_limited(self, user):
                 self.logger.warning("bot-to-bot sender @{} rate limited", getattr(user, "username", None))
                 return
+            if message is not None and _chain_depth_exceeded(self, message):
+                self.logger.warning("bot-to-bot sender @{} exceeded max chain depth", getattr(user, "username", None))
+                return
         await original_on_message(self, update, context)
 
     async def patched_forward_command(self, update: Any, context: Any) -> None:
+        update = _ensure_legacy_message(update)
         user = getattr(update, "effective_user", None)
         if user is not None and getattr(user, "is_bot", False):
+            message = getattr(update, "message", None)
             bot_id, _ = await self._ensure_bot_identity()
             if bot_id and getattr(user, "id", None) == bot_id:
                 return
@@ -154,6 +218,12 @@ def _patch_telegram_channel() -> None:
                 return
             if _rate_limited(self, user):
                 self.logger.warning("bot-to-bot command sender @{} rate limited", getattr(user, "username", None))
+                return
+            if message is not None and _chain_depth_exceeded(self, message):
+                self.logger.warning(
+                    "bot-to-bot command sender @{} exceeded max chain depth",
+                    getattr(user, "username", None),
+                )
                 return
         await original_forward_command(self, update, context)
 

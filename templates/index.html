@@ -207,12 +207,12 @@
             <div class="font-mono text-gray-200" x-text="status.versions?.nanobot_ai || 'not installed'"></div>
           </div>
           <div>
-            <div class="text-gray-500 text-xs mb-1">python-telegram-bot</div>
-            <div class="font-mono text-gray-200" x-text="status.versions?.python_telegram_bot || 'not installed'"></div>
+            <div class="text-gray-500 text-xs mb-1">Telegram SDK</div>
+            <div class="font-mono text-gray-200" x-text="status.versions?.telegram_sdk?.sdk || 'not installed'"></div>
           </div>
           <div>
             <div class="text-gray-500 text-xs mb-1">Telegram Bot API 10</div>
-            <div class="text-gray-400" x-text="status.versions?.telegram_bot_api?.support || 'Status unavailable'"></div>
+            <div class="text-gray-400" x-text="status.versions?.telegram_sdk?.support || 'Status unavailable'"></div>
           </div>
         </div>
       </div>
@@ -518,13 +518,16 @@
                   x-model.number="config.channels.telegram.botToBotMaxPerMinute">
               </div>
               <div class="md:col-span-2 border-t border-gray-800 pt-4 mt-2">
-                <div class="grid grid-cols-1 md:grid-cols-[220px_140px_1fr_auto] gap-3">
+                <div class="grid grid-cols-1 md:grid-cols-[220px_110px_110px_1fr_auto] gap-3">
                   <input type="text"
                     class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
                     x-model="botToBot.target" placeholder="@OtherBot or -100...">
                   <input type="text"
                     class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
                     x-model="botToBot.messageThreadId" placeholder="Topic ID">
+                  <input type="number"
+                    class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
+                    x-model.number="botToBot.chainDepth" placeholder="Depth">
                   <input type="text"
                     class="bg-black border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-300 focus:border-gray-600 focus:outline-none"
                     x-model="botToBot.text" placeholder="/ping@OtherBot hi">
@@ -935,7 +938,7 @@
         restartAfterSave: true,
         toast: { show: false, message: '', type: 'success' },
         customModels: {},
-        botToBot: { target: '', messageThreadId: '', text: '', sending: false },
+        botToBot: { target: '', messageThreadId: '', chainDepth: '', text: '', sending: false },
 
         providerList: [
           // Requested order: Gemini, Anthropic, Groq, OpenAI, then the rest.
@@ -1301,6 +1304,7 @@
               body: JSON.stringify({
                 target: this.botToBot.target,
                 messageThreadId: this.botToBot.messageThreadId,
+                botToBotChainDepth: this.botToBot.chainDepth,
                 text: this.botToBot.text,
               }),
             });

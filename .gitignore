@@ -6,5 +6,6 @@ env/
 __pycache__/
 .DS_Store
 temp
+.tmp_home_smoke/
 nanobot-main
 .tmp-python-telegram-bot-v10/

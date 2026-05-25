@@ -120,9 +120,11 @@ class GatewayManager:
         self._cleanup_read_tasks()
         try:
             env = os.environ.copy()
+            app_path = str(Path(__file__).parent)
             patch_path = str(Path(__file__).parent / "nanobot_railway_patches")
+            native_paths = os.pathsep.join([app_path, patch_path])
             env["PYTHONPATH"] = (
-                patch_path if not env.get("PYTHONPATH") else f"{patch_path}{os.pathsep}{env['PYTHONPATH']}"
+                native_paths if not env.get("PYTHONPATH") else f"{native_paths}{os.pathsep}{env['PYTHONPATH']}"
             )
             self.process = await asyncio.create_subprocess_exec(
                 "nanobot", "gateway",
@@ -301,33 +303,19 @@ def _package_version(package_name: str) -> str | None:
     except PackageNotFoundError:
         return None
 
-
-def _telegram_bot_api_version() -> str | None:
-    try:
-        from telegram.constants import BOT_API_VERSION
-
-        return str(BOT_API_VERSION)
-    except Exception:
-        return None
-
-
 def runtime_versions() -> dict:
-    ptb = _package_version("python-telegram-bot")
-    bot_api = _telegram_bot_api_version()
-    if bot_api == "10.0":
-        support = "Bot API 10.0 wrapper detected. Bot-to-bot transport is enabled when BotFather mode is enabled."
-    else:
-        support = (
-            f"Wrapper reports Bot API {bot_api or 'unknown'}; bot-to-bot sending can still use raw sendMessage, "
-            "but full Bot API 10.0 wrapper coverage is not proven."
-        )
     return {
         "nanobot_ai": _package_version("nanobot-ai"),
-        "python_telegram_bot": ptb,
-        "telegram_bot_api": {
-            "target": "10.0",
-            "wrapper": bot_api,
-            "support": support,
+        "telegram_sdk": {
+            "sdk": "native/v10",
+            "api_version": "10.0",
+            "release": "May 8, 2026",
+            "support": (
+                "Native Bot API v10 HTTP client \u2014 replaces python-telegram-bot entirely. "
+                "Full Bot API 10.0 support: Guest Mode, Live Photos, Bot-to-Bot, "
+                "deleteMessageReaction, deleteAllMessageReactions, sendMessageDraft, "
+                "answerGuestQuery, sendLivePhoto, and more."
+            ),
         },
         "railway_patch": {
             "telegram_bot_to_bot": True,
@@ -486,6 +474,7 @@ async def api_telegram_bot_to_bot_send(request: Request):
     target = str(body.get("target", "")).strip()
     text = str(body.get("text", "")).strip()
     message_thread_id = body.get("messageThreadId")
+    chain_depth = body.get("botToBotChainDepth")
     direct_bot_target = bool(re.fullmatch(r"@[A-Za-z0-9_]{5,32}", target))
     group_chat_target = bool(re.fullmatch(r"-?\d{5,32}", target))
     if not direct_bot_target and not group_chat_target:
@@ -500,6 +489,14 @@ async def api_telegram_bot_to_bot_send(request: Request):
         return JSONResponse({"error": "text is required"}, status_code=400)
     if len(text) > 4096:
         return JSONResponse({"error": "text must be 4096 characters or less"}, status_code=400)
+    if chain_depth in ("", None):
+        chain_depth = None
+    elif not re.fullmatch(r"\d{1,4}", str(chain_depth).strip()):
+        return JSONResponse({"error": "botToBotChainDepth must be numeric when provided"}, status_code=400)
+    if chain_depth is not None:
+        text = f"[nanobot:b2b-depth={int(str(chain_depth).strip())}] {text}"
+        if len(text) > 4096:
+            return JSONResponse({"error": "text with bot-to-bot chain marker must be 4096 characters or less"}, status_code=400)
 
     data = _merged_config_data()
     telegram_config = data.get("channels", {}).get("telegram", {})
@@ -531,6 +528,7 @@ async def api_telegram_bot_to_bot_send(request: Request):
         "target": target,
         "messageId": payload.get("result", {}).get("message_id"),
         "messageThreadId": payload.get("result", {}).get("message_thread_id"),
+        "botToBotChainDepth": int(str(chain_depth).strip()) if chain_depth is not None else None,
     })
 
 

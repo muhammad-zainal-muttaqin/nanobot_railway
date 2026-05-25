@@ -11,7 +11,7 @@ This repository is a lightweight Railway deployment wrapper for [HKUDS/nanobot](
 This fork is patched for the upstream stable package:
 
 * `nanobot-ai==0.2.0`
-* `python-telegram-bot[socks]` from `muhammad-zainal-muttaqin/python-telegram-bot-v10` at commit `164972bf946aa069c3a655f657fdec756590549c`
+* A repo-local native `telegram/` package that talks directly to Telegram Bot API v10 over HTTPS.
 * Starlette, Uvicorn, Jinja2, and python-multipart are bounded below the next major version for more reproducible Railway builds.
 
 Because this repository is a wrapper, upstream core behavior is updated by changing the installed `nanobot-ai` package version in the `Dockerfile`, not by merging upstream Python source files into this repo.
@@ -25,10 +25,11 @@ Compared with a plain `nanobot-ai` install, this Railway wrapper provides:
 * Persistent config under `/data/.nanobot` by setting `HOME=/data`.
 * Masked config API, so secrets shown by `GET /api/config` can be posted back without erasing the real stored values.
 * Config merge behavior that keeps upstream 0.2.0 defaults while preserving older local config, masked secrets, and unknown/plugin channel or provider blocks.
-* `/api/status` version reporting for installed `nanobot-ai`, installed `python-telegram-bot`, gateway state, configured providers, enabled channels, and cron jobs.
+* `/api/status` version reporting for installed `nanobot-ai`, native Telegram SDK state, gateway state, configured providers, enabled channels, and cron jobs.
 * Dashboard controls for additional upstream 0.2.0 fields, including more providers, Telegram options, channel defaults, agent defaults, and tools settings.
-* A runtime Telegram patch loaded through `PYTHONPATH=/app/nanobot_railway_patches`, so the gateway subprocess can accept bot senders when bot-to-bot mode is enabled without vendoring nanobot core source.
+* A runtime Telegram patch loaded through `PYTHONPATH=/app:/app/nanobot_railway_patches`, so the gateway subprocess uses the native Bot API v10 package and can accept bot senders when bot-to-bot mode is enabled without vendoring nanobot core source.
 * A raw Bot API `sendMessage` endpoint and dashboard control to send a private bot message to `@OtherBot`, or a group test message to a numeric Telegram chat ID.
+* The gateway subprocess is launched with the repository root first on `PYTHONPATH`, then `nanobot_railway_patches`, so upstream nanobot imports the native `telegram/` package even when run through the `nanobot gateway` console entry point.
 
 ## Telegram Bot API 10 Note
 
@@ -45,15 +46,17 @@ This wrapper now implements the nanobot-side transport needed for those flows:
 * `channels.telegram.botToBotAllowBots` optionally restricts bot senders by `@username` or numeric bot ID.
 * `channels.telegram.botToBotMaxPerMinute` rate-limits bot-origin messages to reduce accidental loops.
 * The runtime patch applies bot allowlisting to both normal messages and Telegram command messages, so `/command@ThisBot` from another bot is no longer dropped by the older human-only allowlist path.
-* The dashboard can send a private bot-to-bot test message or a group mention test through `POST /api/telegram/bot-to-bot/send`.
+* The dashboard can send a private bot-to-bot test message or a group mention test through `POST /api/telegram/bot-to-bot/send`, including an optional bot-to-bot chain-depth marker for loop-prevention tests.
 
-The pinned fork commit reports `telegram.constants.BOT_API_VERSION == 10.0` and includes a regression test that `Bot.send_message("@OtherBot", "text")` passes the bot username as `chat_id`. The nanobot dashboard still uses a raw HTTPS `sendMessage` call for the manual bot-to-bot send button so this wrapper is not blocked by future PTB method-surface changes.
+The native package reports `telegram.constants.BOT_API_VERSION == "10.0"` and includes regression tests that `Bot.send_message("@OtherBot", "text")` passes the bot username as `chat_id`, `sendMessageDraft` accepts empty text, guest/business messages dispatch through nanobot handlers, and the Railway patch resolves `telegram` to the repo-local package instead of the installed `python-telegram-bot` dependency.
+The native method surface has also been audited against Telegram's current Bot API page: all 176 official method names have a coroutine entry point, and all 303 official type names are importable from `telegram`. Types that are not yet modeled as strict dataclasses use a flexible `TelegramObject` placeholder so raw API responses remain accessible while typed models are added incrementally.
+The native package layout is documented in `docs/native_telegram_sdk.md`.
 
 The dashboard and `/api/status` expose this clearly:
 
-* Existing Telegram long-polling bot behavior remains supported through nanobot upstream.
-* The reported wrapper Bot API version is shown separately from the target Bot API 10.0.
-* Bot-to-bot receive/send controls are exposed. Other Bot API 10-only features are outside this wrapper's current scope.
+* Existing Telegram long-polling bot behavior remains supported through nanobot upstream using the local native SDK.
+* The reported Telegram SDK is `native/v10` with target Bot API 10.0.
+* Bot-to-bot receive/send controls are exposed. Guest Mode, managed-bot settings, live photos, and other v10 methods are represented in the native package surface and continue to be audited against Telegram's official API.
 
 ## Requirements
 
@@ -165,18 +168,34 @@ Without Docker, you can still run the Python checks:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "nanobot-ai==0.2.0" "python-telegram-bot[socks]==22.7" -r requirements.txt
-.\.venv\Scripts\python.exe -m pip install "python-telegram-bot[socks] @ git+https://github.com/muhammad-zainal-muttaqin/python-telegram-bot-v10.git@164972bf946aa069c3a655f657fdec756590549c"
-.\.venv\Scripts\python.exe -m py_compile server.py
-.\.venv\Scripts\python.exe -m py_compile nanobot_railway_patches\sitecustomize.py
-.\.venv\Scripts\python.exe -m mypy server.py nanobot_railway_patches\sitecustomize.py --ignore-missing-imports --check-untyped-defs --show-error-codes
-.\.venv\Scripts\python.exe -m pyright server.py nanobot_railway_patches\sitecustomize.py
+.\.venv\Scripts\python.exe -m pip install --upgrade pip pytest "nanobot-ai==0.2.0" -r requirements.txt
+.\.venv\Scripts\python.exe -m pip uninstall -y python-telegram-bot
+.\.venv\Scripts\python.exe -m compileall telegram server.py nanobot_railway_patches scripts tests
+.\.venv\Scripts\python.exe -m pytest tests
+.\.venv\Scripts\python.exe scripts\verify_nanobot_latest.py
+.\.venv\Scripts\python.exe scripts\audit_telegram_api_surface.py
+.\.venv\Scripts\python.exe scripts\verify_gateway_offline.py
+.\.venv\Scripts\python.exe scripts\verify_telegram_live.py
+$env:PYTHONPATH="$PWD;$PWD\nanobot_railway_patches"
+.\.venv\Scripts\python.exe -c "from nanobot.channels.telegram import TelegramChannel; import telegram; print(telegram.__file__)"
 ```
+
+Or run all local gates together:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\verify_all.py
+```
+
+`scripts\verify_gateway_offline.py` starts `nanobot gateway` with a temporary config, no enabled chat channels, and a dummy provider key; it succeeds if the gateway reaches runtime without importing `python-telegram-bot`.
+
+`scripts\verify_telegram_live.py` skips cleanly without credentials. For live Telegram proof, set `TELEGRAM_BOT_TOKEN`; set `TELEGRAM_BOT_TO_BOT_TARGET=@OtherBot` after enabling Bot-to-Bot Communication Mode for both bots in BotFather to test private bot-to-bot delivery. To prove receive-side bot-to-bot delivery, set `TELEGRAM_EXPECT_BOT_UPDATE_FROM=@OtherBot`, send a message from that bot to this bot, and run the verifier within `TELEGRAM_UPDATE_POLL_SECONDS`. For the final bot-to-bot proof, also set `TELEGRAM_REQUIRE_BOT_TO_BOT=1`; the verifier will fail unless both send and receive evidence are present.
+The full live verification runbook is in `docs/live_telegram_verification.md`.
 
 For container verification on a machine with Docker:
 
 ```powershell
 docker build -t nanobot-railway .
+docker run --rm --entrypoint python nanobot-railway -c "import telegram, importlib.metadata as m; print(telegram.__file__); print(next((d.version for d in m.distributions() if d.metadata['Name']=='python-telegram-bot'), 'python-telegram-bot not installed'))"
 docker run --rm -p 8080:8080 -e PORT=8080 -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=admin -v nanobot-data:/data nanobot-railway
 ```
 

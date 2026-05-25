@@ -31,6 +31,7 @@ Thumbs.db
 *.log
 temp/
 tmp/
+.tmp_home_smoke/
 build/
 dist/
 
