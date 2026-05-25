@@ -1,6 +1,8 @@
 # Git
 .git
 .gitignore
+.gitattributes
+.github/
 
 # Secrets / env files
 .env
@@ -32,12 +34,22 @@ Thumbs.db
 temp/
 tmp/
 .tmp_home_smoke/
+.tmp-python-telegram-bot-v10/
+nanobot-main/
 build/
 dist/
 
 # Runtime data (app uses /data for persistence; don't bake local state into image)
 .nanobot/
 **/.nanobot/
+
+# Repository-only files not copied by the Dockerfile
+docs/
+img/
+scripts/
+tests/
+README.md
+LICENSE
 
 # Node (not used in this repo; ignore if present locally)
 node_modules/

@@ -19,6 +19,10 @@ def test_dockerignore_keeps_native_telegram_package_in_context():
     assert "telegram/" not in ignored
     assert "nanobot_railway_patches/" not in ignored
     assert ".tmp_home_smoke/" in ignored
+    assert "docs/" in ignored
+    assert "img/" in ignored
+    assert "scripts/" in ignored
+    assert "tests/" in ignored
 
 
 def test_railway_uses_dockerfile_and_start_script():

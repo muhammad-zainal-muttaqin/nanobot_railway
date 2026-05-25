@@ -1,11 +1,37 @@
+# Secrets / local env
 .env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
 env/
-*.pyc
-__pycache__/
-.DS_Store
-temp
+
+# Build and runtime output
+build/
+dist/
+*.egg-info/
+*.log
+temp/
+tmp/
 .tmp_home_smoke/
-nanobot-main
 .tmp-python-telegram-bot-v10/
+nanobot-main/
+.nanobot/
+**/.nanobot/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
