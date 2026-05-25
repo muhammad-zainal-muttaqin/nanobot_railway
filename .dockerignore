@@ -36,6 +36,7 @@ tmp/
 .tmp_home_smoke/
 .tmp-python-telegram-bot-v10/
 nanobot-main/
+data/
 build/
 dist/
 
