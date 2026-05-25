@@ -3,7 +3,7 @@
 Environment:
   TELEGRAM_BOT_TOKEN              Required for live checks.
   TELEGRAM_BOT_TO_BOT_TARGET      Optional @OtherBot username for sendMessage.
-  TELEGRAM_GROUP_CHAT_ID          Optional numeric group chat ID for sendMessage.
+  TELEGRAM_GROUP_CHAT_ID          Optional negative numeric group chat ID for sendMessage.
   TELEGRAM_MESSAGE_THREAD_ID      Optional forum topic/thread id for group send.
   TELEGRAM_EXPECT_BOT_UPDATE_FROM Optional @BotUsername or numeric bot id to poll for.
   TELEGRAM_UPDATE_POLL_SECONDS    Optional poll window for inbound proof; default 20.
@@ -52,9 +52,15 @@ def _validate_target(value: str) -> bool:
     return bool(re.fullmatch(r"@[A-Za-z0-9_]{5,32}", value) or re.fullmatch(r"-?\d{5,32}", value))
 
 
-def _parse_int_env(name: str, value: str) -> int:
-    if not re.fullmatch(r"-?\d{1,32}", value.strip()):
-        raise ValueError(f"{name} must be numeric")
+def _parse_group_chat_id_env(value: str) -> int:
+    if not re.fullmatch(r"-\d{5,32}", value.strip()):
+        raise ValueError("TELEGRAM_GROUP_CHAT_ID must be a negative numeric group chat ID")
+    return int(value)
+
+
+def _parse_thread_id_env(value: str) -> int:
+    if not re.fullmatch(r"\d{1,32}", value.strip()):
+        raise ValueError("TELEGRAM_MESSAGE_THREAD_ID must be numeric")
     return int(value)
 
 
@@ -107,10 +113,16 @@ async def verify_live(env: dict[str, str] | None = None) -> tuple[int, dict[str,
         if group_chat_id:
             params: dict[str, Any] = {}
             thread_id = env.get("TELEGRAM_MESSAGE_THREAD_ID", "").strip()
-            if thread_id:
-                params["message_thread_id"] = _parse_int_env("TELEGRAM_MESSAGE_THREAD_ID", thread_id)
+            try:
+                parsed_group_chat_id = _parse_group_chat_id_env(group_chat_id)
+                if thread_id:
+                    params["message_thread_id"] = _parse_thread_id_env(thread_id)
+            except ValueError as exc:
+                checks["status"] = "failed"
+                checks["reason"] = str(exc)
+                return 1, checks
             sent = await bot.send_message(
-                _parse_int_env("TELEGRAM_GROUP_CHAT_ID", group_chat_id),
+                parsed_group_chat_id,
                 "native Bot API v10 live group verification",
                 **params,
             )

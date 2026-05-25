@@ -120,6 +120,32 @@ def test_bot_to_bot_send_rejects_invalid_chain_depth():
     assert response.json()["error"] == "botToBotChainDepth must be numeric when provided"
 
 
+def test_bot_to_bot_send_rejects_private_chat_id_as_group():
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/api/telegram/bot-to-bot/send",
+        headers=_auth_header(),
+        json={"target": "@OtherBot", "groupChatId": "8777874679", "text": "hello"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "groupChatId must be a negative numeric group chat ID when provided"
+
+
+def test_bot_to_bot_send_rejects_private_numeric_target_for_group_topic():
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/api/telegram/bot-to-bot/send",
+        headers=_auth_header(),
+        json={"target": "8777874679", "messageThreadId": "77", "text": "hello"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "target must be a Telegram bot username like @OtherBot or a negative numeric group chat ID"
+
+
 def test_bot_to_bot_send_redacts_token_from_errors(monkeypatch):
     class FakeClient:
         def __init__(self, *args, **kwargs):

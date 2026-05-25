@@ -128,7 +128,7 @@ Additional Telegram settings exposed by this fork include group policy, streamin
 5. Save and restart the gateway.
 6. Use the Telegram bot-to-bot send controls to send a direct test message to `@OtherBot`.
 
-For group communication, add both bots to the same group and prefer command mentions such as `/ping@OtherBot hi` or direct replies to the receiving bot's message. Plain text mentions like `@OtherBot hi` are handled if Telegram delivers the update, but command mentions and replies are the Bot API 10 path to test first. The dashboard target field also accepts a numeric group chat ID such as `-1001234567890`; use the optional topic ID field for forum topics. For unattended multi-agent loops, keep `botToBotMaxPerMinute` conservative.
+For group communication, add both bots to the same group and prefer command mentions such as `/ping@OtherBot hi` or direct replies to the receiving bot's message. Plain text mentions like `@OtherBot hi` are handled if Telegram delivers the update, but command mentions and replies are the Bot API 10 path to test first. The dashboard target field also accepts a negative numeric group chat ID such as `-1001234567890`; use the optional topic ID field for forum topics. For unattended multi-agent loops, keep `botToBotMaxPerMinute` conservative.
 
 ## Start and Monitor
 
@@ -156,7 +156,7 @@ Common checks:
 * `PUT /api/config` - Save config, preserving masked secrets.
 * `GET /api/status` - Gateway state, package versions, providers, channels, cron jobs.
 * `GET /api/telegram/effective-config` - Read effective Telegram config with secrets masked, including bot-to-bot status.
-* `POST /api/telegram/bot-to-bot/send` - Send a raw Bot API `sendMessage` request from the configured Telegram bot token to a target `@BotUsername` or numeric group chat ID.
+* `POST /api/telegram/bot-to-bot/send` - Send a raw Bot API `sendMessage` request from the configured Telegram bot token to a target `@BotUsername` or negative numeric group chat ID.
 * `GET /api/logs` - Recent gateway logs.
 * `POST /api/gateway/start` - Start gateway.
 * `POST /api/gateway/stop` - Stop gateway.
@@ -188,7 +188,7 @@ Or run all local gates together:
 
 `scripts\verify_gateway_offline.py` starts `nanobot gateway` with a temporary config, no enabled chat channels, and a dummy provider key; it succeeds if the gateway reaches runtime without importing `python-telegram-bot`.
 
-`scripts\verify_telegram_live.py` skips cleanly without credentials. For live Telegram proof, set `TELEGRAM_BOT_TOKEN`; set `TELEGRAM_BOT_TO_BOT_TARGET=@OtherBot` after enabling Bot-to-Bot Communication Mode for both bots in BotFather to test private bot-to-bot delivery. To prove receive-side bot-to-bot delivery, set `TELEGRAM_EXPECT_BOT_UPDATE_FROM=@OtherBot`, send a message from that bot to this bot, and run the verifier within `TELEGRAM_UPDATE_POLL_SECONDS`. For the final bot-to-bot proof, also set `TELEGRAM_GROUP_CHAT_ID` and `TELEGRAM_REQUIRE_BOT_TO_BOT=1`; the verifier will fail unless private send, receive, and group/topic evidence are present.
+`scripts\verify_telegram_live.py` skips cleanly without credentials. For live Telegram proof, set `TELEGRAM_BOT_TOKEN`; set `TELEGRAM_BOT_TO_BOT_TARGET=@OtherBot` after enabling Bot-to-Bot Communication Mode for both bots in BotFather to test private bot-to-bot delivery. To prove receive-side bot-to-bot delivery, set `TELEGRAM_EXPECT_BOT_UPDATE_FROM=@OtherBot`, send a message from that bot to this bot, and run the verifier within `TELEGRAM_UPDATE_POLL_SECONDS`. For the final bot-to-bot proof, also set `TELEGRAM_GROUP_CHAT_ID` to a negative group/supergroup ID and `TELEGRAM_REQUIRE_BOT_TO_BOT=1`; the verifier will fail unless private send, receive, and group/topic evidence are present.
 The full live verification runbook is in `docs/live_telegram_verification.md`.
 
 For container verification on a machine with Docker:

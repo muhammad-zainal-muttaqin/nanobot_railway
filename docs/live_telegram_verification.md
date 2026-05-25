@@ -59,7 +59,7 @@ bot_to_bot_receive={'matched': True, ...}
 
 ## Group Or Forum Topic Send
 
-Add both bots to a group. For forum topics, set the topic ID:
+Add both bots to a group. `TELEGRAM_GROUP_CHAT_ID` must be a negative group/supergroup ID. For forum topics, set the positive topic ID:
 
 ```powershell
 $env:TELEGRAM_BOT_TOKEN="123456:ABC..."

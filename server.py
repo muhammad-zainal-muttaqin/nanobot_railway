@@ -488,15 +488,15 @@ async def api_telegram_bot_to_bot_send(request: Request):
     message_thread_id = body.get("messageThreadId")
     chain_depth = body.get("botToBotChainDepth")
     direct_bot_target = bool(re.fullmatch(r"@[A-Za-z0-9_]{5,32}", target))
-    group_chat_target = bool(re.fullmatch(r"-?\d{5,32}", target))
+    group_chat_target = bool(re.fullmatch(r"-\d{5,32}", target))
     if not direct_bot_target and not group_chat_target:
         return JSONResponse({
-            "error": "target must be a Telegram bot username like @OtherBot or a numeric group chat ID"
+            "error": "target must be a Telegram bot username like @OtherBot or a negative numeric group chat ID"
         }, status_code=400)
     if group_chat_id in ("", None):
         group_chat_id = None
-    elif not re.fullmatch(r"-?\d{5,32}", str(group_chat_id).strip()):
-        return JSONResponse({"error": "groupChatId must be numeric when provided"}, status_code=400)
+    elif not re.fullmatch(r"-\d{5,32}", str(group_chat_id).strip()):
+        return JSONResponse({"error": "groupChatId must be a negative numeric group chat ID when provided"}, status_code=400)
     if group_chat_id is not None and not direct_bot_target:
         return JSONResponse({"error": "groupChatId requires target to be a bot username"}, status_code=400)
     if message_thread_id in ("", None):

@@ -74,7 +74,9 @@ def test_live_verify_required_bot_to_bot_passes_with_send_and_receive(monkeypatc
             return {"id": 1}
 
         async def send_message(self, chat_id, text, **kwargs):
-            return Message(message_id=9, date=1, chat=Chat(id=2, type="private"), text=text)
+            if isinstance(chat_id, int):
+                return Message(message_id=9, date=1, chat=Chat(id=chat_id, type="supergroup"), text=text)
+            return Message(message_id=8, date=1, chat=Chat(id=2, type="private"), text=text)
 
         async def _close_client(self):
             pass
@@ -97,7 +99,7 @@ def test_live_verify_required_bot_to_bot_passes_with_send_and_receive(monkeypatc
     assert report["status"] == "ok"
     assert report["bot_to_bot_send"]["target"] == "@OtherBot"
     assert report["bot_to_bot_receive"]["matched"] is True
-    assert report["group_send"]["chat_id"] == 2
+    assert report["group_send"]["chat_id"] == -10012345
 
 
 def test_live_verify_rejects_invalid_bot_to_bot_target(monkeypatch):
@@ -124,6 +126,32 @@ def test_live_verify_rejects_invalid_bot_to_bot_target(monkeypatch):
     assert code == 1
     assert report["status"] == "failed"
     assert report["reason"] == "TELEGRAM_BOT_TO_BOT_TARGET must be @BotUsername or numeric chat ID"
+
+
+def test_live_verify_rejects_private_chat_id_as_group(monkeypatch):
+    class FakeBot:
+        def __init__(self, token):
+            self.token = token
+
+        async def get_me(self):
+            return User(id=1, is_bot=True, first_name="Native", username="NativeBot")
+
+        async def call_api(self, method):
+            return {"id": 1}
+
+        async def _close_client(self):
+            pass
+
+    monkeypatch.setattr(live, "Bot", FakeBot)
+
+    code, report = asyncio.run(verify_live({
+        "TELEGRAM_BOT_TOKEN": "123:token",
+        "TELEGRAM_GROUP_CHAT_ID": "8777874679",
+    }))
+
+    assert code == 1
+    assert report["status"] == "failed"
+    assert report["reason"] == "TELEGRAM_GROUP_CHAT_ID must be a negative numeric group chat ID"
 
 
 def test_expected_bot_update_matching_accepts_username_or_id():
