@@ -22,6 +22,28 @@ def test_api_status_reports_native_telegram_sdk():
     assert versions["telegram_sdk"]["api_version"] == "10.0"
 
 
+def test_env_overrides_effective_config(monkeypatch):
+    monkeypatch.setattr(server, "_stored_config_data", lambda: {"channels": {}, "providers": {}, "agents": {}})
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:env-token")
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USERS", "*,12345")
+    monkeypatch.setenv("TELEGRAM_BOT_TO_BOT", "1")
+    monkeypatch.setenv("TELEGRAM_BOT_TO_BOT_MAX_PER_MINUTE", "5")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter")
+    monkeypatch.setenv("NANOBOT_AGENTS__DEFAULTS__PROVIDER", "openrouter")
+
+    data = server._merged_config_data()
+
+    telegram = data["channels"]["telegram"]
+    assert telegram["token"] == "123:env-token"
+    assert telegram["enabled"] is True
+    assert telegram["allowFrom"] == ["*", "12345"]
+    assert telegram["botToBot"] is True
+    assert telegram["botToBotMaxPerMinute"] == 5
+    assert data["providers"]["openrouter"]["apiKey"] == "sk-openrouter"
+    assert data["agents"]["defaults"]["provider"] == "openrouter"
+
+
 def test_bot_to_bot_send_includes_optional_chain_depth(monkeypatch):
     captured = {}
 

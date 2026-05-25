@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import copy
 import json
 import os
 import re
@@ -62,6 +63,31 @@ SECRET_FIELDS = {
     "verificationToken",
 }
 CONFIG_PATH = Path.home() / ".nanobot" / "config.json"
+RUNTIME_CONFIG_PATH = CONFIG_PATH.with_name("runtime_config.json")
+
+PROVIDER_API_KEY_ENV = {
+    "AIHUBMIX_API_KEY": "aihubmix",
+    "ANTHROPIC_API_KEY": "anthropic",
+    "AZURE_OPENAI_API_KEY": "azureOpenai",
+    "BEDROCK_API_KEY": "bedrock",
+    "BYTEPLUS_API_KEY": "byteplus",
+    "DASHSCOPE_API_KEY": "dashscope",
+    "DEEPSEEK_API_KEY": "deepseek",
+    "GEMINI_API_KEY": "gemini",
+    "GOOGLE_API_KEY": "gemini",
+    "GROQ_API_KEY": "groq",
+    "HUGGINGFACE_API_KEY": "huggingface",
+    "MINIMAX_API_KEY": "minimax",
+    "MISTRAL_API_KEY": "mistral",
+    "MOONSHOT_API_KEY": "moonshot",
+    "NVIDIA_API_KEY": "nvidia",
+    "OPENAI_API_KEY": "openai",
+    "OPENROUTER_API_KEY": "openrouter",
+    "QIANFAN_API_KEY": "qianfan",
+    "SILICONFLOW_API_KEY": "siliconflow",
+    "VOLCENGINE_API_KEY": "volcengine",
+    "ZHIPU_API_KEY": "zhipu",
+}
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -120,6 +146,8 @@ class GatewayManager:
         self._cleanup_read_tasks()
         try:
             env = os.environ.copy()
+            runtime_config = _merged_config_data()
+            _write_runtime_config(runtime_config)
             app_path = str(Path(__file__).parent)
             patch_path = str(Path(__file__).parent / "nanobot_railway_patches")
             native_paths = os.pathsep.join([app_path, patch_path])
@@ -127,7 +155,7 @@ class GatewayManager:
                 native_paths if not env.get("PYTHONPATH") else f"{native_paths}{os.pathsep}{env['PYTHONPATH']}"
             )
             self.process = await asyncio.create_subprocess_exec(
-                "nanobot", "gateway",
+                "nanobot", "gateway", "--config", str(RUNTIME_CONFIG_PATH),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
@@ -247,6 +275,11 @@ def _write_raw_config(data: dict[str, Any]):
     CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _write_runtime_config(data: dict[str, Any]):
+    RUNTIME_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RUNTIME_CONFIG_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def _deep_merge(base: Any, overlay: Any) -> Any:
     if isinstance(base, dict) and isinstance(overlay, dict):
         result = dict(base)
@@ -256,11 +289,151 @@ def _deep_merge(base: Any, overlay: Any) -> Any:
     return overlay
 
 
-def _merged_config_data() -> dict:
+def _set_config_path_value(data: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
+    current = data
+    for key in path[:-1]:
+        next_value = current.get(key)
+        if not isinstance(next_value, dict):
+            next_value = {}
+            current[key] = next_value
+        current = next_value
+    current[path[-1]] = value
+
+
+def _parse_bool_env(name: str, value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
+
+
+def _parse_int_env(name: str, value: str) -> int:
+    if not re.fullmatch(r"-?\d{1,32}", value.strip()):
+        raise ValueError(f"{name} must be numeric")
+    return int(value)
+
+
+def _parse_list_env(value: str) -> list[str]:
+    stripped = value.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("["):
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, list):
+            raise ValueError("list env value must be a JSON array")
+        return [str(item).strip() for item in parsed if str(item).strip()]
+    return [item.strip() for item in stripped.split(",") if item.strip()]
+
+
+def _parse_config_env_value(value: str) -> Any:
+    stripped = value.strip()
+    lowered = stripped.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered == "null":
+        return None
+    if re.fullmatch(r"-?\d+", stripped):
+        return int(stripped)
+    if stripped.startswith(("{", "[")):
+        return json.loads(stripped)
+    return value
+
+
+def _env_path_segment(value: str) -> str:
+    if value.isupper():
+        parts = value.lower().split("_")
+        return parts[0] + "".join(part.title() for part in parts[1:])
+    return value
+
+
+def _apply_generic_nanobot_env(data: dict[str, Any], env: dict[str, str]) -> None:
+    for name, value in env.items():
+        if value == "":
+            continue
+        if name.startswith("NANOBOT_CONFIG__"):
+            suffix = name.removeprefix("NANOBOT_CONFIG__")
+        elif name.startswith("NANOBOT_") and "__" in name:
+            suffix = name.removeprefix("NANOBOT_")
+        else:
+            continue
+        path = tuple(_env_path_segment(part) for part in suffix.split("__") if part)
+        if path:
+            _set_config_path_value(data, path, _parse_config_env_value(value))
+
+
+def _apply_env_overrides(data: dict[str, Any], env: dict[str, str] | None = None) -> dict[str, Any]:
+    if env is None:
+        env = os.environ
+    result = copy.deepcopy(data)
+
+    _apply_generic_nanobot_env(result, env)
+
+    for env_name, provider_name in PROVIDER_API_KEY_ENV.items():
+        value = env.get(env_name, "").strip()
+        if value:
+            _set_config_path_value(result, ("providers", provider_name, "apiKey"), value)
+
+    telegram_token = env.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if telegram_token:
+        _set_config_path_value(result, ("channels", "telegram", "token"), telegram_token)
+
+    telegram_bool_paths = {
+        "TELEGRAM_ENABLED": ("channels", "telegram", "enabled"),
+        "TELEGRAM_BOT_TO_BOT": ("channels", "telegram", "botToBot"),
+        "TELEGRAM_BOT_TO_BOT_ENABLED": ("channels", "telegram", "botToBot"),
+    }
+    for env_name, path in telegram_bool_paths.items():
+        value = env.get(env_name)
+        if value not in (None, ""):
+            _set_config_path_value(result, path, _parse_bool_env(env_name, value))
+
+    telegram_int_paths = {
+        "TELEGRAM_BOT_TO_BOT_MAX_PER_MINUTE": ("channels", "telegram", "botToBotMaxPerMinute"),
+        "TELEGRAM_BOT_TO_BOT_MAX_CHAIN_DEPTH": ("channels", "telegram", "botToBotMaxChainDepth"),
+    }
+    for env_name, path in telegram_int_paths.items():
+        value = env.get(env_name)
+        if value not in (None, ""):
+            _set_config_path_value(result, path, _parse_int_env(env_name, value))
+
+    telegram_list_paths = {
+        "TELEGRAM_ALLOWED_USERS": ("channels", "telegram", "allowFrom"),
+        "TELEGRAM_ALLOW_FROM": ("channels", "telegram", "allowFrom"),
+        "TELEGRAM_BOT_TO_BOT_ALLOW_BOTS": ("channels", "telegram", "botToBotAllowBots"),
+    }
+    for env_name, path in telegram_list_paths.items():
+        value = env.get(env_name)
+        if value not in (None, ""):
+            _set_config_path_value(result, path, _parse_list_env(value))
+
+    telegram_proxy = env.get("TELEGRAM_PROXY", "").strip()
+    if telegram_proxy:
+        _set_config_path_value(result, ("channels", "telegram", "proxy"), telegram_proxy)
+
+    agent_string_paths = {
+        "NANOBOT_PROVIDER": ("agents", "defaults", "provider"),
+        "NANOBOT_MODEL": ("agents", "defaults", "model"),
+        "NANOBOT_TIMEZONE": ("agents", "defaults", "timezone"),
+    }
+    for env_name, path in agent_string_paths.items():
+        value = env.get(env_name, "").strip()
+        if value:
+            _set_config_path_value(result, path, value)
+
+    return result
+
+
+def _stored_config_data() -> dict:
     defaults = Config().model_dump(by_alias=True)
     loaded = load_config().model_dump(by_alias=True)
     raw = _load_raw_config()
     return _deep_merge(_deep_merge(defaults, loaded), raw)
+
+
+def _merged_config_data() -> dict:
+    return _apply_env_overrides(_stored_config_data())
 
 
 def _collect_secret_values(data, field_name):
@@ -386,7 +559,7 @@ async def api_config_put(request: Request):
         restart = body.pop("_restartGateway", False)
 
         async with config_lock:
-            existing_data = _merged_config_data()
+            existing_data = _stored_config_data()
 
             merged = merge_secrets(body, existing_data)
             merged = _normalize_optional_empty_strings(_deep_merge(existing_data, merged))

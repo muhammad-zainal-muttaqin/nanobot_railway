@@ -102,11 +102,34 @@ Railway builds the image with `Dockerfile` and starts `/app/start.sh`.
 
 The dashboard includes upstream 0.2.0 provider slots such as Anthropic, OpenAI, OpenRouter, Gemini, Groq, DeepSeek, Zhipu, vLLM, Azure OpenAI, Bedrock, Hugging Face, DashScope, Ollama, LM Studio, Moonshot, MiniMax, Mistral, SiliconFlow, Volcengine, BytePlus, Qianfan, NVIDIA, and related compatible providers.
 
+## Railway Environment Overrides
+
+For production, you can keep common secrets in Railway service variables instead of pasting them into the dashboard. Env values override the saved dashboard config at runtime and are written only to the generated nanobot runtime config before the gateway starts. Restart/redeploy the service, or restart the gateway, after changing these variables.
+
+Common variables:
+
+```text
+TELEGRAM_ENABLED=1
+TELEGRAM_BOT_TOKEN=123456:ABC...
+TELEGRAM_ALLOWED_USERS=*
+TELEGRAM_BOT_TO_BOT=1
+TELEGRAM_BOT_TO_BOT_ALLOW_BOTS=@AkuHolo_bot,@S_o_R_a_bot
+TELEGRAM_BOT_TO_BOT_MAX_PER_MINUTE=12
+TELEGRAM_BOT_TO_BOT_MAX_CHAIN_DEPTH=6
+OPENAI_API_KEY=sk-...
+OPENROUTER_API_KEY=sk-or-...
+ANTHROPIC_API_KEY=sk-ant-...
+NANOBOT_PROVIDER=auto
+NANOBOT_MODEL=openai/gpt-4o-mini
+```
+
+Advanced config can use double-underscore paths, for example `NANOBOT_PROVIDERS__GROQ__API_KEY`, `NANOBOT_AGENTS__DEFAULTS__TIMEZONE`, or `NANOBOT_CHANNELS__TELEGRAM__GROUP_POLICY`. Path segments in uppercase snake case are converted to the config's lower-camel-case keys, so `API_KEY` becomes `apiKey`.
+
 ## Configure Telegram
 
 1. Go to **Channels**.
 2. Enable Telegram.
-3. Paste your BotFather token.
+3. Paste your BotFather token, or set `TELEGRAM_BOT_TOKEN` in Railway variables.
 4. Set allowed users:
 
 ```text
