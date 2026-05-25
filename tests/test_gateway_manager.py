@@ -50,8 +50,9 @@ def test_gateway_start_writes_env_runtime_config(monkeypatch, tmp_path):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:env-token")
     monkeypatch.setenv("TELEGRAM_ENABLED", "1")
     monkeypatch.setenv("TELEGRAM_BOT_TO_BOT_ALLOW_BOTS", "@AkuHolo_bot,@S_o_R_a_bot")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
-    monkeypatch.setenv("NANOBOT_AGENTS__DEFAULTS__MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-env")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_BASE", "https://llm.example.test/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "acme-chat")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
 
     asyncio.run(manager.start())
@@ -61,5 +62,7 @@ def test_gateway_start_writes_env_runtime_config(monkeypatch, tmp_path):
     assert data["channels"]["telegram"]["enabled"] is True
     assert data["channels"]["telegram"]["token"] == "123:env-token"
     assert data["channels"]["telegram"]["botToBotAllowBots"] == ["@AkuHolo_bot", "@S_o_R_a_bot"]
-    assert data["providers"]["openai"]["apiKey"] == "sk-env"
-    assert data["agents"]["defaults"]["model"] == "openai/gpt-4o-mini"
+    assert data["providers"]["custom"]["apiKey"] == "sk-env"
+    assert data["providers"]["custom"]["apiBase"] == "https://llm.example.test/v1"
+    assert data["agents"]["defaults"]["provider"] == "custom"
+    assert data["agents"]["defaults"]["model"] == "acme-chat"

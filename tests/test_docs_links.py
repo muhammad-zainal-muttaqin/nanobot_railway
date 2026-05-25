@@ -9,6 +9,7 @@ def test_readme_links_core_telegram_docs():
 
     assert "docs/native_telegram_sdk.md" in readme
     assert "docs/live_telegram_verification.md" in readme
+    assert "docs/railway_template.md" in readme
 
 
 def test_completion_audit_links_live_runbook_and_sdk_docs():

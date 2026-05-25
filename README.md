@@ -78,16 +78,18 @@ For local Python-only checks:
 
 1. Deploy this template on Railway.
 2. Attach a persistent volume mounted to `/data`.
-3. Set admin credentials:
+3. Set admin credentials. For a published Railway template, use Railway's template secret function for the password:
 
 ```text
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your-strong-password
+ADMIN_PASSWORD=${{ secret(32) }}
 ```
 
 If `ADMIN_PASSWORD` is not set, the server generates a random password at startup and prints it to logs. For production, set it explicitly.
 
 Railway builds the image with `Dockerfile` and starts `/app/start.sh`.
+
+For template authors, the full publishing checklist and recommended service variables are in `docs/railway_template.md`.
 
 ## Configure Providers
 
@@ -106,7 +108,17 @@ The dashboard includes upstream 0.2.0 provider slots such as Anthropic, OpenAI, 
 
 For production, you can keep common secrets in Railway service variables instead of pasting them into the dashboard. Env values override the saved dashboard config at runtime and are written only to the generated nanobot runtime config before the gateway starts. Restart/redeploy the service, or restart the gateway, after changing these variables.
 
-Common variables:
+OpenAI-compatible quickstart variables for public template users:
+
+```text
+OPENAI_COMPATIBLE_API_KEY=sk-...
+OPENAI_COMPATIBLE_API_BASE=https://api.example.com/v1
+OPENAI_COMPATIBLE_MODEL=provider-model-name
+```
+
+These map to nanobot's `custom` provider and set `NANOBOT_PROVIDER=custom` automatically unless `NANOBOT_PROVIDER` is explicitly set.
+
+Common Telegram variables:
 
 ```text
 TELEGRAM_ENABLED=1
@@ -116,6 +128,11 @@ TELEGRAM_BOT_TO_BOT=1
 TELEGRAM_BOT_TO_BOT_ALLOW_BOTS=@AkuHolo_bot,@S_o_R_a_bot
 TELEGRAM_BOT_TO_BOT_MAX_PER_MINUTE=12
 TELEGRAM_BOT_TO_BOT_MAX_CHAIN_DEPTH=6
+```
+
+Direct provider shortcuts are also supported:
+
+```text
 OPENAI_API_KEY=sk-...
 OPENROUTER_API_KEY=sk-or-...
 ANTHROPIC_API_KEY=sk-ant-...

@@ -27,6 +27,8 @@ def test_railway_uses_dockerfile_and_start_script():
     assert 'builder = "DOCKERFILE"' in railway
     assert 'dockerfilePath = "Dockerfile"' in railway
     assert 'startCommand = "/app/start.sh"' in railway
+    assert 'healthcheckPath = "/health"' in railway
+    assert "healthcheckTimeout = 300" in railway
 
 
 def test_dashboard_bot_to_bot_send_exposes_chain_depth():

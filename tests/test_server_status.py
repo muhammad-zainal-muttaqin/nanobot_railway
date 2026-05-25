@@ -44,6 +44,38 @@ def test_env_overrides_effective_config(monkeypatch):
     assert data["agents"]["defaults"]["provider"] == "openrouter"
 
 
+def test_openai_compatible_template_env_uses_custom_provider(monkeypatch):
+    monkeypatch.setattr(server, "_stored_config_data", lambda: {"channels": {}, "providers": {}, "agents": {}})
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-compatible")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_BASE", "https://llm.example.test/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "acme-chat")
+
+    data = server._merged_config_data()
+
+    assert data["providers"]["custom"]["apiKey"] == "sk-compatible"
+    assert data["providers"]["custom"]["apiBase"] == "https://llm.example.test/v1"
+    assert data["agents"]["defaults"]["provider"] == "custom"
+    assert data["agents"]["defaults"]["model"] == "acme-chat"
+
+
+def test_explicit_nanobot_provider_overrides_openai_compatible_alias(monkeypatch):
+    monkeypatch.setattr(server, "_stored_config_data", lambda: {"channels": {}, "providers": {}, "agents": {}})
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-compatible")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_BASE", "https://friendly.example.test/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "acme-chat")
+    monkeypatch.setenv("NANOBOT_PROVIDERS__CUSTOM__API_KEY", "sk-advanced")
+    monkeypatch.setenv("NANOBOT_PROVIDERS__CUSTOM__API_BASE", "https://advanced.example.test/v1")
+    monkeypatch.setenv("NANOBOT_AGENTS__DEFAULTS__PROVIDER", "openrouter")
+    monkeypatch.setenv("NANOBOT_AGENTS__DEFAULTS__MODEL", "openrouter/auto")
+
+    data = server._merged_config_data()
+
+    assert data["providers"]["custom"]["apiKey"] == "sk-advanced"
+    assert data["providers"]["custom"]["apiBase"] == "https://advanced.example.test/v1"
+    assert data["agents"]["defaults"]["provider"] == "openrouter"
+    assert data["agents"]["defaults"]["model"] == "openrouter/auto"
+
+
 def test_bot_to_bot_send_includes_optional_chain_depth(monkeypatch):
     captured = {}
 

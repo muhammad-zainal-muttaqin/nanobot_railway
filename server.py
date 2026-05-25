@@ -412,6 +412,53 @@ def _apply_env_overrides(data: dict[str, Any], env: dict[str, str] | None = None
     if telegram_proxy:
         _set_config_path_value(result, ("channels", "telegram", "proxy"), telegram_proxy)
 
+    compatible_api_key = env.get("OPENAI_COMPATIBLE_API_KEY", "").strip()
+    compatible_api_base = env.get("OPENAI_COMPATIBLE_API_BASE", "").strip()
+    compatible_model = env.get("OPENAI_COMPATIBLE_MODEL", "").strip()
+
+    explicit_custom_api_key = any(
+        env.get(name, "").strip()
+        for name in (
+            "NANOBOT_PROVIDERS__CUSTOM__API_KEY",
+            "NANOBOT_CONFIG__PROVIDERS__CUSTOM__API_KEY",
+        )
+    )
+    explicit_custom_api_base = any(
+        env.get(name, "").strip()
+        for name in (
+            "NANOBOT_PROVIDERS__CUSTOM__API_BASE",
+            "NANOBOT_CONFIG__PROVIDERS__CUSTOM__API_BASE",
+        )
+    )
+    explicit_model = any(
+        env.get(name, "").strip()
+        for name in (
+            "NANOBOT_MODEL",
+            "NANOBOT_AGENTS__DEFAULTS__MODEL",
+            "NANOBOT_CONFIG__AGENTS__DEFAULTS__MODEL",
+        )
+    )
+    explicit_provider = any(
+        env.get(name, "").strip()
+        for name in (
+            "NANOBOT_PROVIDER",
+            "NANOBOT_AGENTS__DEFAULTS__PROVIDER",
+            "NANOBOT_CONFIG__AGENTS__DEFAULTS__PROVIDER",
+        )
+    )
+
+    if compatible_api_key and not explicit_custom_api_key:
+        _set_config_path_value(result, ("providers", "custom", "apiKey"), compatible_api_key)
+    if compatible_api_base and not explicit_custom_api_base:
+        _set_config_path_value(result, ("providers", "custom", "apiBase"), compatible_api_base)
+    if compatible_model and not explicit_model:
+        _set_config_path_value(result, ("agents", "defaults", "model"), compatible_model)
+    if (
+        (compatible_api_key or compatible_api_base or compatible_model)
+        and not explicit_provider
+    ):
+        _set_config_path_value(result, ("agents", "defaults", "provider"), "custom")
+
     agent_string_paths = {
         "NANOBOT_PROVIDER": ("agents", "defaults", "provider"),
         "NANOBOT_MODEL": ("agents", "defaults", "model"),
