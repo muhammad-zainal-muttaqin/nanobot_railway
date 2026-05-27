@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from contextlib import suppress
 from typing import Any, Callable
 
@@ -114,13 +115,15 @@ class Application:
                     await handler.handle(update, ctx)
                     return
             except Exception as e:
-                self._call_error_handlers(update, e)
+                await self._call_error_handlers(update, e)
 
-    def _call_error_handlers(self, update: object, error: Exception) -> None:
+    async def _call_error_handlers(self, update: object, error: Exception) -> None:
         for handler in self._error_handlers:
             try:
                 ctx = CallbackContext(application=self, error=error)
-                handler(update, ctx)
+                result = handler(update, ctx)
+                if inspect.isawaitable(result):
+                    await result
             except Exception:
                 pass
 
@@ -168,12 +171,12 @@ class Application:
                         offset = update.update_id + 1
 
             except Conflict:
-                self._call_error_handlers(None, Conflict("Another poller/webhook instance"))
+                await self._call_error_handlers(None, Conflict("Another poller/webhook instance"))
                 await asyncio.sleep(_POLL_RETRY_DELAY)
             except (NetworkError, TimedOut):
                 await asyncio.sleep(_POLL_RETRY_DELAY)
             except Exception as e:
-                self._call_error_handlers(None, e)
+                await self._call_error_handlers(None, e)
                 await asyncio.sleep(_POLL_RETRY_DELAY)
 
 
