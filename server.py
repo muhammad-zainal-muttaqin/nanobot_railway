@@ -138,8 +138,13 @@ class GatewayManager:
         self.start_time: float | None = None
         self.restart_count = 0
         self._read_tasks: list[asyncio.Task] = []
+        self._lifecycle_lock = asyncio.Lock()
 
     async def start(self):
+        async with self._lifecycle_lock:
+            await self._start_locked()
+
+    async def _start_locked(self):
         if self.process and self.process.returncode is None:
             return
         self.state = "starting"
@@ -169,6 +174,10 @@ class GatewayManager:
             self.logs.append(f"Failed to start gateway: {e}")
 
     async def stop(self):
+        async with self._lifecycle_lock:
+            await self._stop_locked()
+
+    async def _stop_locked(self):
         if not self.process or self.process.returncode is not None:
             self.state = "stopped"
             self._cleanup_read_tasks()
@@ -185,9 +194,10 @@ class GatewayManager:
         self._cleanup_read_tasks()
 
     async def restart(self):
-        await self.stop()
-        self.restart_count += 1
-        await self.start()
+        async with self._lifecycle_lock:
+            await self._stop_locked()
+            self.restart_count += 1
+            await self._start_locked()
 
     async def _read_output(self):
         try:
@@ -809,9 +819,18 @@ async def api_gateway_restart(request: Request):
     return JSONResponse({"ok": True})
 
 
+def _has_provider_api_key(data: dict[str, Any]) -> bool:
+    providers = data.get("providers") if isinstance(data, dict) else None
+    if not isinstance(providers, dict):
+        return False
+    for prov in providers.values():
+        if isinstance(prov, dict) and (prov.get("apiKey") or prov.get("api_key")):
+            return True
+    return False
+
+
 async def auto_start_gateway():
-    config = load_config()
-    if config.get_api_key():
+    if _has_provider_api_key(_merged_config_data()):
         await gateway.start()
 
 
