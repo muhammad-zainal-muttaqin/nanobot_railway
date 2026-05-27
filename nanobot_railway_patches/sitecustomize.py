@@ -352,7 +352,8 @@ def _patch_telegram_channel() -> None:
 
     async def patched_send(self: Any, msg: Any) -> None:
         metadata = dict(getattr(msg, "metadata", {}) or {})
-        depth = _reply_depth_for_metadata(self, getattr(msg, "chat_id", ""), metadata)
+        chat_id_raw = getattr(msg, "chat_id", "")
+        depth = _reply_depth_for_metadata(self, chat_id_raw, metadata)
         content = getattr(msg, "content", "")
         if depth is not None and isinstance(content, str) and content and content != "[empty message]":
             try:
@@ -362,6 +363,18 @@ def _patch_telegram_channel() -> None:
             except Exception:
                 msg.content = _prefix_bot_depth(content, depth)
                 msg.metadata = metadata
+            content = getattr(msg, "content", content)
+        chat_id_str = str(chat_id_raw).strip()
+        if chat_id_str.startswith("@"):
+            # Bot API 10 allows private bot-to-bot delivery via @username chat_id,
+            # but upstream TelegramChannel.send casts chat_id to int unconditionally.
+            # Route through the native Bot.send_message which accepts string chat_ids.
+            kwargs: dict[str, Any] = {"chat_id": chat_id_str, "text": content}
+            parse_mode = getattr(msg, "parse_mode", None) or metadata.get("parse_mode")
+            if parse_mode:
+                kwargs["parse_mode"] = parse_mode
+            await self.bot.send_message(**kwargs)
+            return
         await original_send(self, msg)
 
     async def patched_send_delta(
