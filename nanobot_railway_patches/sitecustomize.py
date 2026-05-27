@@ -398,6 +398,15 @@ def _patch_telegram_channel() -> None:
             if len(marked) > 1000:
                 marked = set(list(marked)[-500:])
             self._bot_to_bot_marked_streams = marked
+        chat_id_str = str(chat_id).strip()
+        if chat_id_str.startswith("@"):
+            content = delta
+            kwargs: dict[str, Any] = {"chat_id": chat_id_str, "text": content}
+            parse_mode = metadata.get("parse_mode")
+            if parse_mode:
+                kwargs["parse_mode"] = parse_mode
+            await self.bot.send_message(**kwargs)
+            return
         await original_send_delta(self, chat_id, delta, metadata)
 
     TelegramChannel.__init__ = patched_init

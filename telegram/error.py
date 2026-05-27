@@ -44,7 +44,5 @@ _HTTP_STATUS_ERROR_MAP: dict[int, type[Exception]] = {
 def raise_for_status(status_code: int, description: str, parameters: dict | None = None) -> None:
     if parameters and "retry_after" in parameters:
         raise RetryAfter(float(parameters["retry_after"]))
-    if status_code < 400:
-        raise BadRequest(description or "Telegram API request failed")
     cls = _HTTP_STATUS_ERROR_MAP.get(status_code, NetworkError if status_code >= 500 else BadRequest)
     raise cls(f"{status_code}: {description}")
