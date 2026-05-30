@@ -214,7 +214,20 @@ class Bot:
             "offset": offset, "limit": limit, "timeout": timeout,
             "allowed_updates": allowed_updates,
         })
-        return [_parse_update(item) for item in data]
+        # Parse each update independently: a single un-parseable update (e.g. a
+        # new/changed API shape with a now-required field) must not block the
+        # whole batch, or the polling loop would never advance `offset` past the
+        # poison update and Telegram would redeliver it forever (silent stall).
+        result: list[Update] = []
+        for item in data:
+            try:
+                result.append(_parse_update(item))
+            except Exception:
+                uid = item.get("update_id") if isinstance(item, dict) else None
+                if isinstance(uid, int):
+                    # Yield a minimal Update so the loop advances past it.
+                    result.append(Update(update_id=uid))
+        return result
 
     async def set_webhook(
         self, url: str,

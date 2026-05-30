@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+import socket
+from json import JSONDecodeError
 from pathlib import Path
+from urllib.error import URLError
 from urllib.request import urlopen
 
 
@@ -27,7 +30,15 @@ def latest_version() -> str:
 
 def main() -> int:
     pinned = pinned_version()
-    latest = latest_version()
+    try:
+        latest = latest_version()
+    except (URLError, TimeoutError, socket.timeout, JSONDecodeError, KeyError) as exc:
+        # A transient PyPI outage or unexpected payload must not hard-fail the
+        # local gate; a genuine version mismatch still returns 1 below.
+        print(f"source={PYPI_URL}")
+        print(f"pinned={pinned}")
+        print(f"status=skipped (network: {exc})")
+        return 0
     print(f"source={PYPI_URL}")
     print(f"pinned={pinned}")
     print(f"latest={latest}")

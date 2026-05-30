@@ -330,7 +330,10 @@ def _parse_list_env(value: str) -> list[str]:
     if not stripped:
         return []
     if stripped.startswith("["):
-        parsed = json.loads(stripped)
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return [item.strip() for item in stripped.split(",") if item.strip()]
         if not isinstance(parsed, list):
             raise ValueError("list env value must be a JSON array")
         return [str(item).strip() for item in parsed if str(item).strip()]
@@ -347,7 +350,10 @@ def _parse_config_env_value(value: str) -> Any:
     if re.fullmatch(r"-?\d+", stripped):
         return int(stripped)
     if stripped.startswith(("{", "[")):
-        return json.loads(stripped)
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return value
     return value
 
 
@@ -590,7 +596,13 @@ async def homepage(request: Request):
 
 
 async def health(request: Request):
-    await ensure_gateway_started()
+    # Keep the healthcheck green even if config loading / gateway auto-start
+    # fails (e.g. a corrupt persisted config.json). uvicorn is serving fine, so
+    # /health must report ok rather than 500 and fail the whole Railway deploy.
+    try:
+        await ensure_gateway_started()
+    except Exception as e:
+        gateway.logs.append(f"health auto-start skipped: {e}")
     return JSONResponse({"status": "ok", "gateway": gateway.state})
 
 
@@ -770,6 +782,9 @@ async def api_telegram_bot_to_bot_send(request: Request):
     except Exception as e:
         return JSONResponse({"error": f"Telegram request failed: {_redact_telegram_token(str(e), token)}"}, status_code=502)
 
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "Unexpected Telegram response"}, status_code=502)
+
     if not payload.get("ok"):
         sanitized = _redact_telegram_token(payload, token)
         description = sanitized.get("description") if isinstance(sanitized, dict) else None
@@ -869,7 +884,10 @@ app = Starlette(
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("PORT", "8080"))
+    try:
+        port = int(os.environ.get("PORT", "8080"))
+    except (TypeError, ValueError):
+        port = 8080
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
